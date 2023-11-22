@@ -1,4 +1,4 @@
-type 'a parser = string -> ('a * string, string) result
+type 'a parser = char list -> ('a * char list) option
 
 val result : 'a -> 'a parser
 val zero : 'a parser
