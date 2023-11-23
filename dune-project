@@ -11,7 +11,7 @@
 
 (maintainers "Maintainer Name")
 
-(license LICENSE)
+(license MIT)
 
 (documentation https://url/to/documentation)
 
@@ -19,7 +19,7 @@
  (name Parser)
  (synopsis "A short synopsis")
  (description "A longer description")
- (depends ocaml dune)
+ (depends ocaml dune (alcotest :with-test))
  (tags
   (topics "to describe" your project)))
 

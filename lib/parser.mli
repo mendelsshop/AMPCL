@@ -10,3 +10,6 @@ val char : char -> char parser
 val digit : char parser
 val lower : char parser
 val upper : char parser
+val word :  string parser
+val alphanum : char parser
+val string : string -> string parser
