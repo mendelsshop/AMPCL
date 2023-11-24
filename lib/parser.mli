@@ -10,7 +10,10 @@ val char : char -> char parser
 val digit : char parser
 val lower : char parser
 val upper : char parser
-val word :  string parser
+val word : string parser
 val alphanum : char parser
 val string : string -> string parser
-val many: 'a parser -> 'a list parser
+val many : 'a parser -> 'a list parser
+val many1 : 'a parser -> 'a list parser
+val sepby : 'a parser -> 'b parser -> 'a list parser
+val sepby1 : 'a parser -> 'b parser -> 'a list parser

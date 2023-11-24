@@ -39,11 +39,19 @@ let string str =
   let exp_str : char list = List.of_seq (String.to_seq str) in
   string_i exp_str
 
-
 let rec many parser input =
   let neMany =
     parser >>= fun x ->
-    many parser >>= fun xs -> result ( x :: xs)
+    many parser >>= fun xs -> result (x :: xs)
   in
   (neMany ++ result []) input
 
+let many1 p =
+  p >>= fun x ->
+  many p >>= fun xs -> result (x :: xs)
+
+let sepby1 p sep =
+  p >>= fun x ->
+  many ((seq sep p >>= fun (x, _) -> result x) >>= fun xs -> result (x :: xs))
+
+let sepby p sep = (sepby1 p sep) ++ result []
