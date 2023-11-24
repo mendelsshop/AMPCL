@@ -38,3 +38,12 @@ let string str =
   in
   let exp_str : char list = List.of_seq (String.to_seq str) in
   string_i exp_str
+
+
+let rec many parser input =
+  let neMany =
+    parser >>= fun x ->
+    many parser >>= fun xs -> result ( x :: xs)
+  in
+  (neMany ++ result []) input
+

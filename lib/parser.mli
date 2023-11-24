@@ -13,3 +13,4 @@ val upper : char parser
 val word :  string parser
 val alphanum : char parser
 val string : string -> string parser
+val many: 'a parser -> 'a list parser
