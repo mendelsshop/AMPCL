@@ -1,2 +1,3 @@
 (library
- (name Parser))
+  (name Parser)
+  (public_name Parser))
