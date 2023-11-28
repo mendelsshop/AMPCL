@@ -1,9 +1,12 @@
 type 'a parser = char list -> ('a * char list) option
 
+let ( >> ) f g x = g (f x)
+let explode str = str |> String.to_seq |> List.of_seq
 let result v input = Some (v, input)
-let bind p f input = Option.bind (p input) (fun (v, inp) -> f v inp)
+let bind f p input = Option.bind (p input) (fun (v, inp) -> f v inp)
 let ( >>= ) p q input = Option.bind (p input) (fun (v, inp) -> q v inp)
 let zero _ = None
+let map f = bind (f >> result)
 
 let seq p q =
   p >>= fun x ->
@@ -15,9 +18,9 @@ let ( ++ ) p q input =
 let item input = match input with [] -> None | s :: rest -> Some (s, rest)
 let sat p = item >>= fun x -> if p x then result x else zero
 let char x = sat (fun y -> x == y)
-let digit = sat (fun x -> '0' <= x && x >= '9')
-let lower = sat (fun x -> 'a' <= x && x >= 'z')
-let upper = sat (fun x -> 'A' <= x && x >= 'Z')
+let digit = sat (fun x -> '0' <= x && x <= '9')
+let lower = sat (fun x -> 'a' <= x && x <= 'z')
+let upper = sat (fun x -> 'A' <= x && x <= 'Z')
 let letter = upper ++ lower
 let alphanum = letter ++ digit
 
@@ -55,3 +58,4 @@ let sepby1 p sep =
   many (seq sep p >>= fun (_, x) -> result x) >>= fun xs -> result (x :: xs)
 
 let sepby p sep = sepby1 p sep ++ result []
+let opt p = map (fun x -> Some x) p ++ result None
