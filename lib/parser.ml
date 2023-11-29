@@ -1,4 +1,4 @@
-type 'a parser = char list -> ('a * char list) option
+type ('s, 'a) parser = 's list -> ('a * 's list) option
 
 let ( >> ) f g x = g (f x)
 let explode str = str |> String.to_seq |> List.of_seq
@@ -7,12 +7,13 @@ let bind f p input = Option.bind (p input) (fun (v, inp) -> f v inp)
 let ( >>= ) p q input = Option.bind (p input) (fun (v, inp) -> q v inp)
 let zero _ = None
 let map f = bind (f >> result)
+let ( <$> ) p f = map f p
 
 let seq p q =
   p >>= fun x ->
   q >>= fun y -> result (x, y)
 
-let ( ++ ) p q input =
+let ( <|> ) p q input =
   Option.fold ~some:(fun x -> Some x) ~none:(q input) (p input)
 
 let item input = match input with [] -> None | s :: rest -> Some (s, rest)
@@ -21,15 +22,15 @@ let char x = sat (fun y -> x == y)
 let digit = sat (fun x -> '0' <= x && x <= '9')
 let lower = sat (fun x -> 'a' <= x && x <= 'z')
 let upper = sat (fun x -> 'A' <= x && x <= 'Z')
-let letter = upper ++ lower
-let alphanum = letter ++ digit
+let letter = upper <|> lower
+let alphanum = letter <|> digit
 
 let rec word input =
   let neWord =
     letter >>= fun x ->
     word >>= fun xs -> result (String.make 1 x ^ xs)
   in
-  (neWord ++ result "") input
+  (neWord <|> result "") input
 
 let string str =
   let rec string_i x =
@@ -47,7 +48,7 @@ let rec many parser =
     parser >>= fun x ->
     many parser >>= fun xs -> result (x :: xs)
   in
-  neMany ++ result []
+  neMany <|> result []
 
 let many1 p =
   p >>= fun x ->
@@ -57,5 +58,5 @@ let sepby1 p sep =
   p >>= fun x ->
   many (seq sep p >>= fun (_, x) -> result x) >>= fun xs -> result (x :: xs)
 
-let sepby p sep = sepby1 p sep ++ result []
-let opt p = map (fun x -> Some x) p ++ result None
+let sepby p sep = sepby1 p sep <|> result []
+let opt p = ( <$> ) p (fun x -> Some x)  <|> result None

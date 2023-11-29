@@ -29,7 +29,7 @@ let number =
   Parser.map
     (fun (f, ((_ : char), s)) ->
       Float.of_string (String.of_seq (List.to_seq (f @ ('.' :: s)))))
-    (Parser.( ++ ) number_dot_number_opt number_opt_dot_number)
+    (Parser.( <|> ) number_dot_number_opt number_opt_dot_number)
 
 let number_test name expected string () =
   Alcotest.(check (option (pair (float 0.0001) (list char))))
