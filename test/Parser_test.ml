@@ -16,19 +16,25 @@ let test_string x () =
     (Some (x, []))
     ((Parser.string x) (Parser.explode x))
 
-let integer = Parser.many Parser.digit
+let integer_opt = Parser.many Parser.digit
+let integer = Parser.many1 Parser.digit
+let decimal = Parser.char '.'
 
 let number =
+  let number_opt_dot_number =
+    Parser.seq integer_opt (Parser.seq decimal integer)
+  and number_dot_number_opt =
+    Parser.seq integer (Parser.seq decimal integer_opt)
+  in
   Parser.map
-    (fun (f, (_, s)) ->
+    (fun (f, ((_ : char), s)) ->
       Float.of_string (String.of_seq (List.to_seq (f @ ('.' :: s)))))
-    (Parser.seq integer (Parser.seq (Parser.char '.') integer))
+    (Parser.( ++ ) number_dot_number_opt number_opt_dot_number)
 
-let number_test () =
+let number_test name expected string () =
   Alcotest.(check (option (pair (float 0.0001) (list char))))
-    "float 5.6"
-    (Some (5.6, []))
-    (number (Parser.explode "5.6"))
+    ("float " ^ name) expected
+    (number (Parser.explode string))
 
 let () =
   let open Alcotest in
@@ -45,5 +51,13 @@ let () =
           test_case "y" `Quick (test_char 'y');
         ] );
       ("string", [ test_case "hi" `Quick (test_string "hi") ]);
-      ("float", [ test_case "5.6" `Quick number_test ]);
+      ( "float",
+        [
+          test_case "5.6" `Quick (number_test "5.6" (Some (5.6, [])) "5.6");
+          test_case "." `Quick (number_test "invalid no actual number" None ".");
+          test_case "6.7 d  " `Quick
+            (number_test "number with trailing stuff"
+               (Some (6.7, [ ' '; 'd'; ' '; ' ' ]))
+               "6.7 d  ");
+        ] );
     ]

@@ -1,3 +1,3 @@
 (test
- (name Parser)
+ (name Parser_test)
   (libraries Parser alcotest))

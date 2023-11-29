@@ -6,6 +6,7 @@ val zero : 'a parser
 val item : char parser
 val bind : ('a -> 'b parser) ->  'a parser -> 'b parser
 val (>>=) : 'a parser -> ('a -> 'b parser) -> 'b parser
+val (++) : 'a parser -> 'a parser -> 'a parser
 val map :  ('a -> 'b) ->'a parser -> 'b parser
 val seq : 'a parser -> 'b parser -> ('a * 'b) parser
 val sat : (char -> bool) -> char parser
