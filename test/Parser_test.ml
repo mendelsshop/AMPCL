@@ -2,39 +2,39 @@ let test_char x () =
   Alcotest.(check (option (pair char (list char))))
     ("char " ^ String.make 1 x)
     (Some (x, []))
-    ((Parser.char x) (x :: []))
+    ((AMPCL.char x) (x :: []))
 
 let test_digit x is_digit () =
   Alcotest.(check (option (pair char (list char))))
     ("digit " ^ String.make 1 x)
     (if is_digit then Some (x, []) else None)
-    (Parser.digit (x :: []))
+    (AMPCL.digit (x :: []))
 
 let test_string x () =
   Alcotest.(check (option (pair string (list char))))
     ("string " ^ x)
     (Some (x, []))
-    ((Parser.string x) (Parser.explode x))
+    ((AMPCL.string x) (AMPCL.explode x))
 
-let integer_opt = Parser.many Parser.digit
-let integer = Parser.many1 Parser.digit
-let decimal = Parser.char '.'
+let integer_opt = AMPCL.many AMPCL.digit
+let integer = AMPCL.many1 AMPCL.digit
+let decimal = AMPCL.char '.'
 
 let number =
   let number_opt_dot_number =
-    Parser.seq integer_opt (Parser.seq decimal integer)
+    AMPCL.seq integer_opt (AMPCL.seq decimal integer)
   and number_dot_number_opt =
-    Parser.seq integer (Parser.seq decimal integer_opt)
+    AMPCL.seq integer (AMPCL.seq decimal integer_opt)
   in
-  Parser.map
+  AMPCL.map
     (fun (f, ((_ : char), s)) ->
       Float.of_string (String.of_seq (List.to_seq (f @ ('.' :: s)))))
-    (Parser.( <|> ) number_dot_number_opt number_opt_dot_number)
+    (AMPCL.( <|> ) number_dot_number_opt number_opt_dot_number)
 
 let number_test name expected string () =
   Alcotest.(check (option (pair (float 0.0001) (list char))))
     ("float " ^ name) expected
-    (number (Parser.explode string))
+    (number (AMPCL.explode string))
 
 let () =
   let open Alcotest in
