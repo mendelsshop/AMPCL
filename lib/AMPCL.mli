@@ -1,6 +1,7 @@
 type ('s, 'a) parser = 's list -> ('a * 's list) option
 
 val explode : string -> char list
+val implode : char list -> string
 val return : 'a -> ('s, 'a) parser
 val zero : ('s, 'a) parser
 val item : ('a, 'a) parser
