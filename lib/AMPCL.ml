@@ -39,13 +39,6 @@ let upper = sat (fun x -> 'A' <= x && x <= 'Z')
 let letter = upper <|> lower
 let alphanum = letter <|> digit
 
-let rec word input =
-  let neWord =
-    letter >>= fun x ->
-    word >>= fun xs -> return (String.make 1 x ^ xs)
-  in
-  (neWord <|> return "") input
-
 let string str =
   let rec string_i x =
     match x with
@@ -68,6 +61,8 @@ let many1 p =
   p >>= fun x ->
   many p >>= fun xs -> return (x :: xs)
 
+let word = many letter <$> implode
+let word1 = many1 letter <$> implode
 let sepby1 p sep =
   p >>= fun x ->
   many (seq sep p >>= fun (_, x) -> return x) >>= fun xs -> return (x :: xs)

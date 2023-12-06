@@ -27,6 +27,7 @@ val digit : (char, char) parser
 val lower : (char, char) parser
 val upper : (char, char) parser
 val word : (char, string) parser
+val word1 : (char, string) parser
 val alphanum : (char, char) parser
 val string : string -> (char, string) parser
 val many : ('s, 'a) parser -> ('s, 'a list) parser
