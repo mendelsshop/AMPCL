@@ -19,7 +19,7 @@ val ( >> ) : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a) parser
 val keep_left : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a) parser
 
 val between :
-  ('s, 'l) parser -> ('s, 'r) parser -> ('s, 'r) parser -> ('s, 'r) parser
+  ('s, 'l) parser -> ('s, 'a) parser -> ('s, 'r) parser -> ('s, 'a) parser
 
 val sat : ('a -> bool) -> ('a, 'a) parser
 val char : char -> (char, char) parser
