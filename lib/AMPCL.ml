@@ -27,7 +27,6 @@ let ( <|> ) p q input =
   Option.fold ~some:(fun x -> Some x) ~none:(q input) (p input)
 
 let alt = ( <|> )
-
 let between l r p = l << p >> r
 let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
 let item input = match input with [] -> None | s :: rest -> Some (s, rest)
@@ -63,9 +62,16 @@ let many1 p =
 
 let word = many letter <$> implode
 let word1 = many1 letter <$> implode
+
 let sepby1 p sep =
   p >>= fun x ->
   many (seq sep p >>= fun (_, x) -> return x) >>= fun xs -> return (x :: xs)
 
 let sepby p sep = sepby1 p sep <|> return []
 let opt p = p <$> (fun x -> Some x) <|> return None
+
+let rec count n p =
+  if n = 0 then return []
+  else
+    p >>= fun x ->
+    count (n - 1) p >>= fun xs -> return (x :: xs)
