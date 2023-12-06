@@ -28,7 +28,7 @@ let ( <|> ) p q input =
 
 let alt = ( <|> )
 
-let between l r p = l >> p << r
+let between l r p = l << p >> r
 let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
 let item input = match input with [] -> None | s :: rest -> Some (s, rest)
 let sat p = item >>= fun x -> if p x then return x else zero
