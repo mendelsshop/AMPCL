@@ -24,6 +24,7 @@ val between :
 val sat : ('a -> bool) -> ('a, 'a) parser
 val char : char -> (char, char) parser
 val digit : (char, char) parser
+val letter : (char, char) parser
 val lower : (char, char) parser
 val upper : (char, char) parser
 val word : (char, string) parser
