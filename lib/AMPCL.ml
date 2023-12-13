@@ -75,3 +75,5 @@ let rec count n p =
   else
     p >>= fun x ->
     count (n - 1) p >>= fun xs -> return (x :: xs)
+
+let check predicate p = p >>= fun x -> if predicate x then return x else zero

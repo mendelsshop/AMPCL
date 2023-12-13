@@ -1,40 +1,44 @@
+open AMPCL
+
 let test_char x () =
   Alcotest.(check (option (pair char (list char))))
     ("char " ^ String.make 1 x)
     (Some (x, []))
-    ((AMPCL.char x) (x :: []))
+    ((char x) (x :: []))
 
 let test_digit x is_digit () =
   Alcotest.(check (option (pair char (list char))))
     ("digit " ^ String.make 1 x)
     (if is_digit then Some (x, []) else None)
-    (AMPCL.digit (x :: []))
+    (digit (x :: []))
 
 let test_string x () =
   Alcotest.(check (option (pair string (list char))))
     ("string " ^ x)
     (Some (x, []))
-    ((AMPCL.string x) (AMPCL.explode x))
+    ((string x) (AMPCL.explode x))
 
-let integer_opt = AMPCL.many AMPCL.digit
-let integer = AMPCL.many1 AMPCL.digit
-let decimal = AMPCL.char '.'
+let integer_opt = many AMPCL.digit
+let integer = many1 AMPCL.digit
+let decimal = char '.'
 
 let number =
-  let number_opt_dot_number =
-    AMPCL.seq integer_opt (AMPCL.seq decimal integer)
-  and number_dot_number_opt =
-    AMPCL.seq integer (AMPCL.seq decimal integer_opt)
-  in
-  AMPCL.map
+  let number_opt_dot_number = seq integer_opt (AMPCL.seq decimal integer)
+  and number_dot_number_opt = seq integer (AMPCL.seq decimal integer_opt) in
+  map
     (fun (f, ((_ : char), s)) ->
       Float.of_string (String.of_seq (List.to_seq (f @ ('.' :: s)))))
-    (AMPCL.( <|> ) number_dot_number_opt number_opt_dot_number)
+    (number_dot_number_opt <|> number_opt_dot_number)
 
 let number_test name expected string () =
   Alcotest.(check (option (pair (float 0.0001) (list char))))
     ("float " ^ name) expected
-    (number (AMPCL.explode string))
+    (number (explode string))
+
+let check_test () =
+  Alcotest.(check (option (pair string (list char))))
+    "check if" None
+    (check (fun x -> x <> "if") word (explode "if"))
 
 let () =
   let open Alcotest in
@@ -51,6 +55,7 @@ let () =
           test_case "y" `Quick (test_char 'y');
         ] );
       ("string", [ test_case "hi" `Quick (test_string "hi") ]);
+      ("check", [ test_case "if" `Quick check_test ]);
       ( "float",
         [
           test_case "5.6" `Quick (number_test "5.6" (Some (5.6, [])) "5.6");

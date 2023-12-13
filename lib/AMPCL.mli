@@ -37,3 +37,4 @@ val sepby : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a list) parser
 val sepby1 : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a list) parser
 val opt : ('s, 'a) parser -> ('s, 'a option) parser
 val count : int -> ('s, 'a) parser -> ('s, 'a list) parser
+val check : ('a -> bool) -> ('s, 'a) parser -> ('s, 'a) parser
