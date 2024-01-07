@@ -3,6 +3,11 @@ type ('s, 'a) parser = 's list -> ('a * 's list) option
 let ( >> ) f g x = g (f x)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
+
+let run p str =
+  (fun (parsed, str') -> if List.is_empty str' then None else Some parsed)
+  |> Option.bind (str |> explode |> p)
+
 let return v input = Some (v, input)
 let ( >>= ) p q input = Option.bind (p input) (fun (v, inp) -> q v inp)
 let bind f p input = Option.bind (p input) (fun (v, inp) -> f v inp)
