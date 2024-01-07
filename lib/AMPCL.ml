@@ -5,7 +5,7 @@ let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
 let run p str =
-  (fun (parsed, str') -> if List.is_empty str' then None else Some parsed)
+  (fun (parsed, str') -> if List.is_empty str' then Some parsed else None)
   |> Option.bind (str |> explode |> p)
 
 let return v input = Some (v, input)
