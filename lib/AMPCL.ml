@@ -1,3 +1,4 @@
+(*TODO: have expected part*)
 type 'e error = { default : string; custom : 'e option }
 type ('s, 'a, 'e) parser = 's list -> ('a * 's list, 'e error) result
 
@@ -32,12 +33,25 @@ let ( >> ) p q =
   q >>= fun _ -> return r
 
 let keep_left = ( >> )
+let map_error f p = p & Result.map_error f
+
+let internal_label e =
+  map_error (fun { custom; default } -> { custom; default = e default })
+
+let label e =
+  map_error (fun { custom = _; default } -> { custom = Some e; default })
 
 let ( <|> ) p q input =
-  Result.fold ~ok:(fun x -> Ok x) ~error:(fun _ -> q input) (p input)
+  Result.fold
+    ~ok:(fun x -> Ok x)
+    ~error:(fun { default = e'; _ } ->
+      (q |> internal_label (fun e -> e' ^ " or " ^ e)) input)
+    (p input)
 
 let alt = ( <|> )
 let between l r p = l << p >> r
+
+(*TODO: make error not contain fail*)
 let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
 
 let item input =
@@ -45,32 +59,22 @@ let item input =
   | [] -> Error { default = "no input"; custom = None }
   | s :: rest -> Ok (s, rest)
 
-let map_error f p = p & Result.map_error f
-
-let internal_label e =
-  map_error (fun { custom; default = _ } -> { custom; default = e })
-
-let label e =
-  map_error (fun { custom = _; default } -> { custom = Some e; default })
-
 let sat p = item >>= fun x -> if p x then return x else zero
-
-let char x =
-  sat (fun y -> x == y) |> internal_label ("Expected " ^ String.make 1 x)
+let char x = sat (fun y -> x == y) |> internal_label (fun _ -> String.make 1 x)
 
 let digit =
-  sat (fun x -> '0' <= x && x <= '9') |> internal_label "Expected digit"
+  sat (fun x -> '0' <= x && x <= '9') |> internal_label (fun _ -> "digit")
 
 let lower =
   sat (fun x -> 'a' <= x && x <= 'z')
-  |> internal_label "Expected lower case letter"
+  |> internal_label (fun _ -> "lower case letter")
 
 let upper =
   sat (fun x -> 'A' <= x && x <= 'Z')
-  |> internal_label "Expected upper case letter"
+  |> internal_label (fun _ -> "upper case letter")
 
-let letter = upper <|> lower |> internal_label "expected letter"
-let alphanum = letter <|> digit |> internal_label "expected letter or digit"
+let letter = upper <|> lower |> internal_label (fun _ -> "letter")
+let alphanum = letter <|> digit |> internal_label (fun _ -> " digit")
 
 let string str =
   let rec string_i x =
@@ -81,7 +85,7 @@ let string str =
         string_i xs >>= fun xs -> return (String.make 1 x ^ xs)
   in
   let exp_str : char list = List.of_seq (String.to_seq str) in
-  string_i exp_str
+  string_i exp_str |> internal_label (fun _ -> str)
 
 let rec many parser =
   let neMany =
