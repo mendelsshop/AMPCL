@@ -1,41 +1,41 @@
-type ('s, 'a) parser = 's list -> ('a * 's list) option
-
+type 'e  error = { default: string; custom: 'e option }
+type ('s, 'a, 'e) parser = 's list -> ('a * 's list, 'e error) result
 val explode : string -> char list
 val implode : char list -> string
-val run : (char, 'a) parser -> string -> 'a option
-val return : 'a -> ('s, 'a) parser
-val zero : ('s, 'a) parser
-val item : ('a, 'a) parser
-val bind : ('a -> ('s, 'b) parser) -> ('s, 'a) parser -> ('s, 'b) parser
-val ( >>= ) : ('s, 'a) parser -> ('a -> ('s, 'b) parser) -> ('s, 'b) parser
-val ( <|> ) : ('s, 'a) parser -> ('s, 'a) parser -> ('s, 'a) parser
-val alt : ('s, 'a) parser -> ('s, 'a) parser -> ('s, 'a) parser
-val choice : ('s, 'a) parser list -> ('s, 'a) parser
-val map : ('a -> 'b) -> ('s, 'a) parser -> ('s, 'b) parser
-val ( <$> ) : ('s, 'a) parser -> ('a -> 'b) -> ('s, 'b) parser
-val seq : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a * 'b) parser
-val ( << ) : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'b) parser
-val keep_right : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'b) parser
-val ( >> ) : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a) parser
-val keep_left : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a) parser
+val run : (char, 'a, 'e) parser -> string -> ('a, 'e error) result
+val return : 'a -> ('s, 'a, 'e) parser
+val zero : ('s, 'a, 'e) parser
+val item : ('a, 'a, 'e) parser
+val bind : ('a -> ('s, 'b, 'e) parser) -> ('s, 'a, 'e) parser -> ('s, 'b,'e) parser
+val ( >>= ) : ('s, 'a, 'e) parser -> ('a -> ('s, 'b, 'e) parser) -> ('s, 'b, 'e) parser
+val ( <|> ) : ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser
+val alt : ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser
+val choice : ('s, 'a, 'e) parser list -> ('s, 'a, 'e) parser
+val map : ('a -> 'b) -> ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser
+val ( <$> ) : ('s, 'a, 'e) parser -> ('a -> 'b) -> ('s, 'b, 'e) parser
+val seq : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'a * 'b, 'e) parser
+val ( << ) : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'b, 'e) parser
+val keep_right : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'b, 'e) parser
+val ( >> ) : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'a, 'e) parser
+val keep_left : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'a, 'e) parser
 
 val between :
-  ('s, 'l) parser -> ('s, 'r) parser -> ('s, 'a) parser -> ('s, 'a) parser
+  ('s, 'l, 'e) parser -> ('s, 'r, 'e) parser -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser
 
-val sat : ('a -> bool) -> ('a, 'a) parser
-val char : char -> (char, char) parser
-val digit : (char, char) parser
-val letter : (char, char) parser
-val lower : (char, char) parser
-val upper : (char, char) parser
-val word : (char, string) parser
-val word1 : (char, string) parser
-val alphanum : (char, char) parser
-val string : string -> (char, string) parser
-val many : ('s, 'a) parser -> ('s, 'a list) parser
-val many1 : ('s, 'a) parser -> ('s, 'a list) parser
-val sepby : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a list) parser
-val sepby1 : ('s, 'a) parser -> ('s, 'b) parser -> ('s, 'a list) parser
-val opt : ('s, 'a) parser -> ('s, 'a option) parser
-val count : int -> ('s, 'a) parser -> ('s, 'a list) parser
-val check : ('a -> bool) -> ('s, 'a) parser -> ('s, 'a) parser
+val sat : ('a -> bool) -> ('a, 'a, 'e) parser
+val char : char -> (char, char, 'e) parser
+val digit : (char, char, 'e) parser
+val letter : (char, char, 'e) parser
+val lower : (char, char, 'e) parser
+val upper : (char, char, 'e) parser
+val word : (char, string, 'e) parser
+val word1 : (char, string, 'e) parser
+val alphanum : (char, char, 'e) parser
+val string : string -> (char, string, 'e) parser
+val many : ('s, 'a, 'e) parser -> ('s, 'a list, 'e) parser
+val many1 : ('s, 'a, 'e) parser -> ('s, 'a list, 'e) parser
+val sepby : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'a list, 'e) parser
+val sepby1 : ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser -> ('s, 'a list, 'e) parser
+val opt : ('s, 'a, 'e) parser -> ('s, 'a option, 'e) parser
+val count : int -> ('s, 'a, 'e) parser -> ('s, 'a list, 'e) parser
+val check : ('a -> bool) -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser

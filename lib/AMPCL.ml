@@ -1,17 +1,20 @@
-type ('s, 'a) parser = 's list -> ('a * 's list) option
+type 'e error = { default : string; custom : 'e option }
+type ('s, 'a, 'e) parser = 's list -> ('a * 's list, 'e error) result
 
 let ( >> ) f g x = g (f x)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
 let run p str =
-  (fun (parsed, str') -> if List.length str' = 0 then Some parsed else None)
-  |> Option.bind (str |> explode |> p)
+  (fun (parsed, str') ->
+    if List.length str' = 0 then Ok parsed
+    else Error { default = "eof"; custom = None })
+  |> Result.bind (str |> explode |> p)
 
-let return v input = Some (v, input)
-let ( >>= ) p q input = Option.bind (p input) (fun (v, inp) -> q v inp)
-let bind f p input = Option.bind (p input) (fun (v, inp) -> f v inp)
-let zero _ = None
+let return v input = Ok (v, input)
+let ( >>= ) p q input = Result.bind (p input) (fun (v, inp) -> q v inp)
+let bind f p input = Result.bind (p input) (fun (v, inp) -> f v inp)
+let zero _ = Error { default = "fail"; custom = None }
 let map f = bind (f >> return)
 let ( <$> ) p f = map f p
 
@@ -29,12 +32,17 @@ let ( >> ) p q =
 let keep_left = ( >> )
 
 let ( <|> ) p q input =
-  Option.fold ~some:(fun x -> Some x) ~none:(q input) (p input)
+  Result.fold ~ok:(fun x -> Ok x) ~error:(fun _ -> q input) (p input)
 
 let alt = ( <|> )
 let between l r p = l << p >> r
 let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
-let item input = match input with [] -> None | s :: rest -> Some (s, rest)
+
+let item input =
+  match input with
+  | [] -> Error { default = "no input"; custom = None }
+  | s :: rest -> Ok (s, rest)
+
 let sat p = item >>= fun x -> if p x then return x else zero
 let char x = sat (fun y -> x == y)
 let digit = sat (fun x -> '0' <= x && x <= '9')
