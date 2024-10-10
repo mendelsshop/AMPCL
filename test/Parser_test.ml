@@ -1,7 +1,7 @@
 open AMPCL
 
 let error _e =
-  let pp f t= Fmt.pf f "@[default=%s]" t.default  in
+  let pp f t = Fmt.pf f "@[default=%s]" t.default in
   let equal { custom; default } { custom = custom'; default = default' } =
     custom = custom' && default = default'
   in
@@ -16,7 +16,8 @@ let test_char x () =
 let test_digit x is_digit () =
   Alcotest.(check (result (pair char (list char)) (error string)))
     ("digit " ^ String.make 1 x)
-    (if is_digit then Ok (x, []) else Error { custom = None; default = "fail" })
+    (if is_digit then Ok (x, [])
+     else Error { custom = None; default = "Expected digit" })
     (digit (x :: []))
 
 let test_string x () =
@@ -69,7 +70,7 @@ let () =
           test_case "5.6" `Quick (number_test "5.6" (Ok (5.6, [])) "5.6");
           test_case "." `Quick
             (number_test "invalid no actual number"
-               (Error { default = "no input"; custom = None })
+               (Error { default = "Expected digit"; custom = None })
                ".");
           test_case "6.7 d  " `Quick
             (number_test "number with trailing stuff"

@@ -1,7 +1,9 @@
 type 'e error = { default : string; custom : 'e option }
 type ('s, 'a, 'e) parser = 's list -> ('a * 's list, 'e error) result
 
-let ( >> ) f g x = g (f x)
+let ( & ) f g x = g (f x)
+
+(*let ( >> ) f g x = g (f x)*)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
@@ -15,7 +17,7 @@ let return v input = Ok (v, input)
 let ( >>= ) p q input = Result.bind (p input) (fun (v, inp) -> q v inp)
 let bind f p input = Result.bind (p input) (fun (v, inp) -> f v inp)
 let zero _ = Error { default = "fail"; custom = None }
-let map f = bind (f >> return)
+let map f = bind (f & return)
 let ( <$> ) p f = map f p
 
 let seq p q =
@@ -43,13 +45,32 @@ let item input =
   | [] -> Error { default = "no input"; custom = None }
   | s :: rest -> Ok (s, rest)
 
+let map_error f p = p & Result.map_error f
+
+let internal_label e =
+  map_error (fun { custom; default = _ } -> { custom; default = e })
+
+let label e =
+  map_error (fun { custom = _; default } -> { custom = Some e; default })
+
 let sat p = item >>= fun x -> if p x then return x else zero
-let char x = sat (fun y -> x == y)
-let digit = sat (fun x -> '0' <= x && x <= '9')
-let lower = sat (fun x -> 'a' <= x && x <= 'z')
-let upper = sat (fun x -> 'A' <= x && x <= 'Z')
-let letter = upper <|> lower
-let alphanum = letter <|> digit
+
+let char x =
+  sat (fun y -> x == y) |> internal_label ("Expected " ^ String.make 1 x)
+
+let digit =
+  sat (fun x -> '0' <= x && x <= '9') |> internal_label "Expected digit"
+
+let lower =
+  sat (fun x -> 'a' <= x && x <= 'z')
+  |> internal_label "Expected lower case letter"
+
+let upper =
+  sat (fun x -> 'A' <= x && x <= 'Z')
+  |> internal_label "Expected upper case letter"
+
+let letter = upper <|> lower |> internal_label "expected letter"
+let alphanum = letter <|> digit |> internal_label "expected letter or digit"
 
 let string str =
   let rec string_i x =
