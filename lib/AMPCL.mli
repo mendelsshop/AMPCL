@@ -1,10 +1,14 @@
 type 'e error = { default : string; custom : 'e option }
-type ('s, 'a, 'e) parser = 's list -> ('a * 's list, 'e error) result
+type ('s, 'a, 'e) parser = 's list -> 'e error -> ('a * 's list, 'e error) result
 
 val explode : string -> char list
 val implode : char list -> string
 val run : (char, 'a, 'e) parser -> string -> ('a, 'e error) result
+val ( >>= ) :
+  ('s, 'a, 'e) parser -> ('a -> ('s, 'b, 'e) parser) -> ('s, 'b, 'e) parser
 val return : 'a -> ('s, 'a, 'e) parser
+    val map_error :
+      ('e error -> 'ee error) -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser
 val label : 'ee -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser
 val zero : ('s, 'a, 'e) parser
 val item : ('a, 'a, 'e) parser
@@ -12,8 +16,6 @@ val item : ('a, 'a, 'e) parser
 val bind :
   ('a -> ('s, 'b, 'e) parser) -> ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser
 
-val ( >>= ) :
-  ('s, 'a, 'e) parser -> ('a -> ('s, 'b, 'e) parser) -> ('s, 'b, 'e) parser
 
 val ( <|> ) : ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser
 val alt : ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser

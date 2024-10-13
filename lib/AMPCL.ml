@@ -1,23 +1,34 @@
 (*TODO: have expected part*)
 type 'e error = { default : string; custom : 'e option }
-type ('s, 'a, 'e) parser = 's list -> ('a * 's list, 'e error) result
+
+type ('s, 'a, 'e) parser =
+  's list -> 'e error -> ('a * 's list, 'e error) result
 
 let ( & ) f g x = g (f x)
+let ( &. ) f g x y = g (f x y)
 
 (*let ( >> ) f g x = g (f x)*)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
-let run p str =
+let run (p : ('s, 'a, 'e) parser) str =
   (fun (parsed, str') ->
     if List.length str' = 0 then Ok parsed
     else Error { default = "eof"; custom = None })
-  |> Result.bind (str |> explode |> p)
+  |> Result.bind (p (str |> explode) { custom = None; default = "" })
 
-let return v input = Ok (v, input)
-let ( >>= ) p q input = Result.bind (p input) (fun (v, inp) -> q v inp)
-let bind f p input = Result.bind (p input) (fun (v, inp) -> f v inp)
-let zero _ = Error { default = "fail"; custom = None }
+let (return : 'a -> ('s, 'a, 'e) parser) = fun v input _ -> Ok (v, input)
+
+let (( >>= ) :
+      ('s, 'a, 'e) parser -> ('a -> ('s, 'b, 'e) parser) -> ('s, 'b, 'e) parser)
+    =
+ fun p q input e -> Result.bind (p input e) (fun (v, inp) -> q v inp e)
+
+let bind f p = p >>= f
+
+let zero : ('s, 'a, 'e) parser =
+ fun _ _ -> Error { default = "fail"; custom = None }
+
 let map f = bind (f & return)
 let ( <$> ) p f = map f p
 
@@ -33,20 +44,34 @@ let ( >> ) p q =
   q >>= fun _ -> return r
 
 let keep_left = ( >> )
-let map_error f p = p & Result.map_error f
+
+(*problem is that parser is not a binary function (-> ->), but & is for -> unary*)
+(*let (map_error :*)
+(*      ('e error -> 'ee error) -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser) =*)
+(* fun (f : 'e error -> 'ee error) (p : ('s, 'a, 'e) parser) ->*)
+(*  p &. Result.map_error f*)
+
+(*This does not work because, it takes a parser of 'e and returns a parser of 'ee*)
+(*But, we also take a new error ('ee) for the return parse (along with the input) which is fed into the orginal parser which expects 'e*)
+(*Maybe just refactor parser definiton*)
+let (map_error :
+      (string error -> int error) -> ('s, 'a, string) parser -> ('s, 'a, int) parser) =
+ fun (f : string error -> int error) p i e ->
+   p i (f e)
 
 let internal_label e =
   map_error (fun { custom; default } -> { custom; default = e default })
 
-let label e =
+let (label : 'ee -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser) =
+ fun (e : 'ee) ->
   map_error (fun { custom = _; default } -> { custom = Some e; default })
 
-let ( <|> ) p q input =
+let ( <|> ) p q input es =
   Result.fold
     ~ok:(fun x -> Ok x)
     ~error:(fun { default = e'; _ } ->
-      (q |> internal_label (fun e -> e' ^ " or " ^ e)) input)
-    (p input)
+      (q |> internal_label (fun e -> e' ^ " or " ^ e)) input es)
+    (p input es)
 
 let alt = ( <|> )
 let between l r p = l << p >> r
@@ -54,12 +79,13 @@ let between l r p = l << p >> r
 (*TODO: make error not contain fail*)
 let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
 
-let item input =
-  match input with
-  | [] -> Error { default = "no input"; custom = None }
-  | s :: rest -> Ok (s, rest)
+let (item : ('a, 'a, 'e) parser) =
+ fun input error ->
+  match input with [] -> Error error | s :: rest -> Ok (s, rest)
 
-let sat p = item >>= fun x -> if p x then return x else zero
+let sat (p : 'a -> bool) : ('a, 'a, 'e) parser =
+  item >>= fun x -> if p x then return x else zero
+
 let char x = sat (fun y -> x == y) |> internal_label (fun _ -> String.make 1 x)
 
 let digit =
@@ -69,11 +95,13 @@ let lower =
   sat (fun x -> 'a' <= x && x <= 'z')
   |> internal_label (fun _ -> "lower case letter")
 
-let upper =
+let upper : ('s, char, 'e) parser =
   sat (fun x -> 'A' <= x && x <= 'Z')
   |> internal_label (fun _ -> "upper case letter")
 
-let letter = upper <|> lower |> internal_label (fun _ -> "letter")
+let letter : ('s, char, 'e) parser =
+  upper <|> lower |> internal_label (fun _ -> "letter")
+
 let alphanum = letter <|> digit |> internal_label (fun _ -> " digit")
 
 let string str =
@@ -92,7 +120,7 @@ let rec many parser =
     parser >>= fun x ->
     many parser >>= fun xs -> return (x :: xs)
   in
-  neMany <|> return []
+  neMany <|> return [] |> internal_label (fun e -> "many " ^ e)
 
 let many1 p =
   p >>= fun x ->
