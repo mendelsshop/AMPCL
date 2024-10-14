@@ -1,8 +1,9 @@
 (*TODO: have expected part*)
 type 'e error = { default : string; custom : 'e option }
 
-type ('s, 'a, 'e) parser =
-  's list -> 'e error -> ('a * 's list, 'e error) result
+(*We have to error generics, to make map_error work properly*)
+type ('s, 'a, 'e, 'ee) parser =
+  's list -> 'e error -> ('a * 's list, 'ee error) result
 
 let ( & ) f g x = g (f x)
 let ( &. ) f g x y = g (f x y)
@@ -11,24 +12,16 @@ let ( &. ) f g x y = g (f x y)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
-let run (p : ('s, 'a, 'e) parser) str =
+let run p str =
   (fun (parsed, str') ->
     if List.length str' = 0 then Ok parsed
     else Error { default = "eof"; custom = None })
   |> Result.bind (p (str |> explode) { custom = None; default = "" })
 
-let (return : 'a -> ('s, 'a, 'e) parser) = fun v input _ -> Ok (v, input)
-
-let (( >>= ) :
-      ('s, 'a, 'e) parser -> ('a -> ('s, 'b, 'e) parser) -> ('s, 'b, 'e) parser)
-    =
- fun p q input e -> Result.bind (p input e) (fun (v, inp) -> q v inp e)
-
+let return v input _ = Ok (v, input)
+let ( >>= ) p q input e = Result.bind (p input e) (fun (v, inp) -> q v inp e)
 let bind f p = p >>= f
-
-let zero : ('s, 'a, 'e) parser =
- fun _ _ -> Error { default = "fail"; custom = None }
-
+let zero _ _ = Error { default = "fail"; custom = None }
 let map f = bind (f & return)
 let ( <$> ) p f = map f p
 
@@ -44,33 +37,28 @@ let ( >> ) p q =
   q >>= fun _ -> return r
 
 let keep_left = ( >> )
-
-(*problem is that parser is not a binary function (-> ->), but & is for -> unary*)
-(*let (map_error :*)
-(*      ('e error -> 'ee error) -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser) =*)
-(* fun (f : 'e error -> 'ee error) (p : ('s, 'a, 'e) parser) ->*)
-(*  p &. Result.map_error f*)
-
 (*This does not work because, it takes a parser of 'e and returns a parser of 'ee*)
-(*But, we also take a new error ('ee) for the return parse (along with the input) which is fed into the orginal parser which expects 'e*)
+(*But, we also take a new error ('ee) for the return parse (along with the input) which is fed into the orginal parser which expects 'e (this doesn't work for  base combinators, see item)*)
 (*Maybe just refactor parser definiton*)
-let (map_error :
-      (string error -> int error) -> ('s, 'a, string) parser -> ('s, 'a, int) parser) =
- fun (f : string error -> int error) p i e ->
-   p i (f e)
+let map_error (f : 'e error -> 'ee error) p = p &. Result.map_error f
 
-let internal_label e =
+let internal_label
+    (*:*)
+    (*    (string -> string) ->*)
+    (*    ('s, 'a, 'e, 'ee) parser ->*)
+    (*    ('s, 'a, 'ee, 'ee) parser*) e =
   map_error (fun { custom; default } -> { custom; default = e default })
 
-let (label : 'ee -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser) =
- fun (e : 'ee) ->
+let label (e : 'ee) =
   map_error (fun { custom = _; default } -> { custom = Some e; default })
 
-let ( <|> ) p q input es =
+let ( <|> ) (p : ('s, 'a, 'e, 'ee) parser) (q : ('s, 'a, 'e, 'ee) parser)
+    input es  =
   Result.fold
     ~ok:(fun x -> Ok x)
     ~error:(fun { default = e'; _ } ->
-      (q |> internal_label (fun e -> e' ^ " or " ^ e)) input es)
+      let x = q |> internal_label (fun e -> e' ^ " or " ^ e) in
+      x input es)
     (p input es)
 
 let alt = ( <|> )
@@ -79,27 +67,28 @@ let between l r p = l << p >> r
 (*TODO: make error not contain fail*)
 let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
 
-let (item : ('a, 'a, 'e) parser) =
+(*We cannot make this, be (..., 'e, 'e) parser, because then you cannot map error over it, but since we are plugging in the input error in*)
+let (item : ('a, 'a, 'e, 'ee) parser) =
  fun input error ->
   match input with [] -> Error error | s :: rest -> Ok (s, rest)
 
-let sat (p : 'a -> bool) : ('a, 'a, 'e) parser =
+let sat (p : 'a -> bool) : ('a, 'a, 'e, 'ee) parser =
   item >>= fun x -> if p x then return x else zero
 
 let char x = sat (fun y -> x == y) |> internal_label (fun _ -> String.make 1 x)
 
-let digit =
+let digit : (char, char, 'e, 'e) parser =
   sat (fun x -> '0' <= x && x <= '9') |> internal_label (fun _ -> "digit")
 
-let lower =
+let lower : (char, char, 'e, 'e) parser =
   sat (fun x -> 'a' <= x && x <= 'z')
   |> internal_label (fun _ -> "lower case letter")
 
-let upper : ('s, char, 'e) parser =
+let upper : (char, char, 'e, 'e) parser =
   sat (fun x -> 'A' <= x && x <= 'Z')
   |> internal_label (fun _ -> "upper case letter")
 
-let letter : ('s, char, 'e) parser =
+let letter : (char, char, 'e, 'e) parser =
   upper <|> lower |> internal_label (fun _ -> "letter")
 
 let alphanum = letter <|> digit |> internal_label (fun _ -> " digit")
