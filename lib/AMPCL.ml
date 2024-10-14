@@ -143,18 +143,19 @@ let rec many parser =
     parser >>= fun x ->
     many parser >>= fun xs -> return (x :: xs)
   in
-  neMany <|> return [] |> internal_label (fun e -> "many " ^ e)
+  neMany <|> return []
 
 let many1 p =
-  p >>= fun x ->
-  many p >>= fun xs -> return (x :: xs)
+  p
+  >>= (fun x -> many p >>= fun xs -> return (x :: xs))
+  |> internal_label (fun e -> "at least one (" ^ e ^ ")")
 
 let word = many letter <$> implode
-let word1 = many1 letter <$> implode
+let word1 = many1 letter <$> implode |> internal_label (fun _ -> "word")
 
 let sepby1 p sep =
   p >>= fun x ->
-  many (seq sep p >>= fun (_, x) -> return x) >>= fun xs -> return (x :: xs)
+  many (sep << p ) >>= fun xs -> return (x :: xs)
 
 let sepby p sep = sepby1 p sep <|> return []
 let opt p = p <$> (fun x -> Some x) <|> return None
