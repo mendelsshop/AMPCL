@@ -1,5 +1,6 @@
-type 'e error = { default : string; custom : 'e option }
 
+type default_error = Fail | Message of string
+type 'e error = { default : default_error; custom : 'e option }
 
 type ('s, 'a, 'e) parser =
   | Parser of {

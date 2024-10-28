@@ -1,5 +1,6 @@
 (*TODO: have expected part*)
-type 'e error = { default : string; custom : 'e option }
+type default_error = Fail | Message of string
+type 'e error = { default : default_error; custom : 'e option }
 
 (*We have to error generics, to make map_error work properly*)
 type ('s, 'a, 'e) parser =
@@ -39,8 +40,7 @@ let ( >>= ) (Parser { unParse = unParseP }) q =
 let bind f p = p >>= f
 
 let zero =
-  Parser
-    { unParse = (fun s _ err -> err { default = "fail"; custom = None } s) }
+  Parser { unParse = (fun s _ err -> err { default = Fail; custom = None } s) }
 
 let map f = bind (f & return)
 let ( <$> ) p f = map f p
@@ -71,20 +71,34 @@ let map_error f (Parser { unParse = p }) =
           p s ok' err');
     }
 
-let internal_label e =
-  map_error (fun { custom; default } -> { custom; default = e default })
+let internal_label f =
+  map_error (function
+    | { custom; default = Message e } -> { default = Message (f e); custom }
+    | e -> e)
 
 let label e =
   map_error (fun { custom = _; default } -> { custom = Some e; default })
+
+let join_internal_error : 'e error -> 'e error -> 'e error = function
+  (* TODO: merge custom errors  *)
+  | { custom = custom1; default = Fail } -> (
+      function
+      | { custom = _; default = Fail } -> { default = Fail; custom = custom1 }
+      | e -> e)
+  | { custom = custom1; default = Message default1 } -> (
+      function
+      | { custom = _; default = Message default2 } ->
+          { default = Message (default1 ^ " or " ^ default2); custom = custom1 }
+      | _ -> { custom = custom1; default = Message default1 })
 
 let ( <|> ) (Parser { unParse = p }) q =
   Parser
     {
       unParse =
         (fun s ok err ->
-          let error { default = e; _ } s =
+          let error e s =
             let (Parser { unParse = q' }) =
-              q |> internal_label (fun e' -> e ^ " or " ^ e')
+              q |> map_error (join_internal_error e)
             in
             q' s ok err
           in
@@ -105,7 +119,7 @@ let item =
       unParse =
         (fun input ok err ->
           match input with
-          | [] -> err { default = "eof"; custom = None } input
+          | [] -> err { default = Message "eof"; custom = None } input
           | s :: rest -> ok s rest);
     }
 
@@ -155,7 +169,7 @@ let word1 = many1 letter <$> implode |> internal_label (fun _ -> "word")
 
 let sepby1 p sep =
   p >>= fun x ->
-  many (sep << p ) >>= fun xs -> return (x :: xs)
+  many (sep << p) >>= fun xs -> return (x :: xs)
 
 let sepby p sep = sepby1 p sep <|> return []
 let opt p = p <$> (fun x -> Some x) <|> return None
