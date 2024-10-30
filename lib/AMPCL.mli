@@ -1,7 +1,4 @@
-
-type default_error = Fail | Message of string
-type 'e error = { default : default_error; custom : 'e option }
-
+type 'e error = Fail | Label of string | Custom of 'e
 type ('s, 'a, 'e) parser =
   | Parser of {
       unParse :
@@ -23,7 +20,7 @@ val ( >>= ) :
 
 val map : ('a -> 'b) -> ('s, 'a, 'e) parser -> ('s, 'b, 'e) parser
 val ( <$> ) : ('s, 'a, 'e) parser -> ('a -> 'b) -> ('s, 'b, 'e) parser
-val label : 'ee -> ('s, 'a, 'e) parser -> ('s, 'a, 'ee) parser
+val label : string -> ('s, 'a, 'e) parser -> ('s, 'a, 'e) parser
 val zero : ('s, 'a, 'e) parser
 val item : ('a, 'a, 'e) parser
 

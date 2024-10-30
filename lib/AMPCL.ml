@@ -1,6 +1,6 @@
 (*TODO: have expected part*)
-type default_error = Fail | Message of string
-type 'e error = { default : default_error; custom : 'e option }
+type 'e error = Fail | Label of string | Custom of 'e
+(* type 'e error = { default : error; custom : 'e option } *)
 
 (*We have to error generics, to make map_error work properly*)
 type ('s, 'a, 'e) parser =
@@ -38,10 +38,7 @@ let ( >>= ) (Parser { unParse = unParseP }) q =
     }
 
 let bind f p = p >>= f
-
-let zero =
-  Parser { unParse = (fun s _ err -> err { default = Fail; custom = None } s) }
-
+let zero = Parser { unParse = (fun s _ err -> err Fail s) }
 let map f = bind (f & return)
 let ( <$> ) p f = map f p
 
@@ -71,25 +68,25 @@ let map_error f (Parser { unParse = p }) =
           p s ok' err');
     }
 
-let internal_label f =
-  map_error (function
-    | { custom; default = Message e } -> { default = Message (f e); custom }
-    | e -> e)
+let map_label f = map_error (function Label l -> Label (f l) | e -> e)
 
 let label e =
-  map_error (fun { custom = _; default } -> { custom = Some e; default })
+  map_error (function Label _ | Fail -> Label e | Custom e -> Custom e)
 
-let join_internal_error : 'e error -> 'e error -> 'e error = function
-  (* TODO: merge custom errors  *)
-  | { custom = custom1; default = Fail } -> (
-      function
-      | { custom = _; default = Fail } -> { default = Fail; custom = custom1 }
-      | e -> e)
-  | { custom = custom1; default = Message default1 } -> (
-      function
-      | { custom = _; default = Message default2 } ->
-          { default = Message (default1 ^ " or " ^ default2); custom = custom1 }
-      | _ -> { custom = custom1; default = Message default1 })
+let alt_error : 'e error -> 'e error -> 'e error =
+ fun e1 e2 ->
+  match (e1, e2) with
+  | Fail, Fail -> Fail
+  | Fail, Label l | Label l, Fail ->
+      Label l
+      (* TODO: merge custom errors
+         This requires changing custom to list of customs
+         maybe we should have list of errors, or split like megaparsec into custom or not custom each one should be a list of errors of that type
+         type default = | Label of string | Fail | ...
+         type 'e error = Custom of 'e list | Default of default list
+      *)
+  | Custom c, _ | _, Custom c -> Custom c
+  | Label l1, Label l2 -> Label (l1 ^ " or " ^ l2)
 
 let ( <|> ) (Parser { unParse = p }) q =
   Parser
@@ -97,9 +94,7 @@ let ( <|> ) (Parser { unParse = p }) q =
       unParse =
         (fun s ok err ->
           let error e s =
-            let (Parser { unParse = q' }) =
-              q |> map_error (join_internal_error e)
-            in
+            let (Parser { unParse = q' }) = q |> map_error (alt_error e) in
             q' s ok err
           in
           p s ok error);
@@ -119,26 +114,24 @@ let item =
       unParse =
         (fun input ok err ->
           match input with
-          | [] -> err { default = Message "eof"; custom = None } input
+          | [] -> err (Label "eof") input
           | s :: rest -> ok s rest);
     }
 
 let sat p = item >>= fun x -> if p x then return x else zero
-let char x = sat (fun y -> x == y) |> internal_label (fun _ -> String.make 1 x)
-
-let digit =
-  sat (fun x -> '0' <= x && x <= '9') |> internal_label (fun _ -> "digit")
+let char x = sat (fun y -> x == y) |> map_label (fun _ -> String.make 1 x)
+let digit = sat (fun x -> '0' <= x && x <= '9') |> map_label (fun _ -> "digit")
 
 let lower =
   sat (fun x -> 'a' <= x && x <= 'z')
-  |> internal_label (fun _ -> "lower case letter")
+  |> map_label (fun _ -> "lower case letter")
 
 let upper =
   sat (fun x -> 'A' <= x && x <= 'Z')
-  |> internal_label (fun _ -> "upper case letter")
+  |> map_label (fun _ -> "upper case letter")
 
-let letter = upper <|> lower |> internal_label (fun _ -> "letter")
-let alphanum = letter <|> digit |> internal_label (fun _ -> " digit")
+let letter = upper <|> lower |> map_label (fun _ -> "letter")
+let alphanum = letter <|> digit |> map_label (fun _ -> " digit")
 
 let string str =
   let rec string_i x =
@@ -149,7 +142,7 @@ let string str =
         string_i xs >>= fun xs -> return (String.make 1 x ^ xs)
   in
   let exp_str : char list = List.of_seq (String.to_seq str) in
-  string_i exp_str |> internal_label (fun _ -> str)
+  string_i exp_str |> map_label (fun _ -> str)
 
 (*TODO: better error*)
 let rec many parser =
@@ -162,10 +155,10 @@ let rec many parser =
 let many1 p =
   p
   >>= (fun x -> many p >>= fun xs -> return (x :: xs))
-  |> internal_label (fun e -> "at least one (" ^ e ^ ")")
+  |> map_label (fun e -> "at least one (" ^ e ^ ")")
 
 let word = many letter <$> implode
-let word1 = many1 letter <$> implode |> internal_label (fun _ -> "word")
+let word1 = many1 letter <$> implode |> map_label (fun _ -> "word")
 
 let sepby1 p sep =
   p >>= fun x ->
