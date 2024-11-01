@@ -1,6 +1,11 @@
-(*TODO: have expected part*)
-type 'e error = Fail | Label of string | Custom of 'e
-(* type 'e error = { default : error; custom : 'e option } *)
+module StringSet = Set.Make (String)
+
+(* TODO: paramaterize over input state and error
+   for error it is to be able to constrain it to be able to be used in a set
+   for state so that we can get line numbers
+   by parameterize I think I mean make this into a module paramaterized over those things
+*)
+type ('s, 'e) error = Label of StringSet.t * 's option | Custom of 'e
 
 (*We have to error generics, to make map_error work properly*)
 type ('s, 'a, 'e) parser =
@@ -8,9 +13,9 @@ type ('s, 'a, 'e) parser =
       unParse :
         'b 'ee.
         's list ->
-        ('a -> 's list -> 's list * ('b, 'ee error) result) ->
-        ('e error -> 's list -> 's list * ('b, 'ee error) result) ->
-        's list * ('b, 'ee error) result;
+        ('a -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
+        (('s, 'e) error -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
+        's list * ('b, ('s, 'ee) error) result;
     }
 
 let ( & ) f g x = g (f x)
@@ -19,7 +24,7 @@ let ( & ) f g x = g (f x)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
-let run' (Parser { unParse }) str : char list * ('a, 'e error) result =
+let run' (Parser { unParse }) str : char list * ('a, (char, 'e) error) result =
   unParse (str |> explode) (fun a s -> (s, Ok a)) (fun e s -> (s, Error e))
 
 let run p str = run' p str |> snd
@@ -38,7 +43,10 @@ let ( >>= ) (Parser { unParse = unParseP }) q =
     }
 
 let bind f p = p >>= f
-let zero = Parser { unParse = (fun s _ err -> err Fail s) }
+
+let zero =
+  Parser { unParse = (fun s _ err -> err (Label (StringSet.empty, None)) s) }
+
 let map f = bind (f & return)
 let ( <$> ) p f = map f p
 
@@ -68,34 +76,35 @@ let map_error f (Parser { unParse = p }) =
           p s ok' err');
     }
 
-let map_label f = map_error (function Label l -> Label (f l) | e -> e)
+(* let map_label f = map_error (function Label l -> Label (f l) | e -> e) *)
 
 let label e =
-  map_error (function Label _ | Fail -> Label e | Custom e -> Custom e)
+  map_error (function
+    | Label (_, a) -> Label (StringSet.singleton e, a)
+    | Custom e -> Custom e)
 
-let alt_error : 'e error -> 'e error -> 'e error =
+let alt_error : ('s, 'e) error -> ('s, 'e) error -> ('s, 'e) error =
  fun e1 e2 ->
   match (e1, e2) with
-  | Fail, Fail -> Fail
-  | Fail, Label l | Label l, Fail ->
-      Label l
-      (* TODO: merge custom errors
-         This requires changing custom to list of customs
-         maybe we should have list of errors, or split like megaparsec into custom or not custom each one should be a list of errors of that type
-         type default = | Label of string | Fail | ...
-         type 'e error = Custom of 'e list | Default of default list
-      *)
+  (* TODO: merge custom errors
+     This requires changing custom to list of customs
+     maybe we should have list of errors, or split like megaparsec into custom or not custom each one should be a list of errors of that type
+     type default = | Label of string | Fail | ...
+     type 'e error = Custom of 'e list | Default of default list
+  *)
   | Custom c, _ | _, Custom c -> Custom c
-  | Label l1, Label l2 -> Label (l1 ^ " or " ^ l2)
+  | Label (l1, a1), Label (l2, a2) ->
+      (* TODO: find the error that absorbed the most input *)
+      Label (StringSet.union l1 l2, Option.fold ~none:a2 ~some:(fun _ -> a1) a1)
 
-let ( <|> ) (Parser { unParse = p }) q =
+let ( <|> ) (Parser { unParse = p }) (Parser { unParse = q }) =
   Parser
     {
       unParse =
         (fun s ok err ->
-          let error e s =
-            let (Parser { unParse = q' }) = q |> map_error (alt_error e) in
-            q' s ok err
+          let error e _ms =
+            let nerror e' s' = err (alt_error e e') s' in
+            q s ok nerror
           in
           p s ok error);
     }
@@ -114,24 +123,30 @@ let item =
       unParse =
         (fun input ok err ->
           match input with
-          | [] -> err (Label "eof") input
+          | [] -> err (Label (StringSet.singleton "eof", None)) input
           | s :: rest -> ok s rest);
     }
 
-let sat p = item >>= fun x -> if p x then return x else zero
-let char x = sat (fun y -> x == y) |> map_label (fun _ -> String.make 1 x)
-let digit = sat (fun x -> '0' <= x && x <= '9') |> map_label (fun _ -> "digit")
+let token f =
+  Parser
+    {
+      unParse =
+        (fun input ok err ->
+          match input with
+          | [] -> err (Label (StringSet.singleton "eof", None)) input
+          | s :: rest -> (
+              match f s with
+              | Some e -> err (Label (e, Some s)) input
+              | _ -> ok s rest));
+    }
 
-let lower =
-  sat (fun x -> 'a' <= x && x <= 'z')
-  |> map_label (fun _ -> "lower case letter")
-
-let upper =
-  sat (fun x -> 'A' <= x && x <= 'Z')
-  |> map_label (fun _ -> "upper case letter")
-
-let letter = upper <|> lower |> map_label (fun _ -> "letter")
-let alphanum = letter <|> digit |> map_label (fun _ -> " digit")
+let sat p = token (fun s -> if p s then None else Some StringSet.empty)
+let char x = sat (fun y -> x == y) |> label (String.make 1 x)
+let digit = sat (fun x -> '0' <= x && x <= '9') |> label "digit"
+let lower = sat (fun x -> 'a' <= x && x <= 'z') |> label "lower case letter"
+let upper = sat (fun x -> 'A' <= x && x <= 'Z') |> label "upper case letter"
+let letter = upper <|> lower |> label "letter"
+let alphanum = letter <|> digit |> label " digit"
 
 let string str =
   let rec string_i x =
@@ -142,7 +157,7 @@ let string str =
         string_i xs >>= fun xs -> return (String.make 1 x ^ xs)
   in
   let exp_str : char list = List.of_seq (String.to_seq str) in
-  string_i exp_str |> map_label (fun _ -> str)
+  string_i exp_str |> label str
 
 (*TODO: better error*)
 let rec many parser =
@@ -153,12 +168,11 @@ let rec many parser =
   neMany <|> return []
 
 let many1 p =
-  p
-  >>= (fun x -> many p >>= fun xs -> return (x :: xs))
-  |> map_label (fun e -> "at least one (" ^ e ^ ")")
+  p >>= fun x ->
+  many p >>= fun xs -> return (x :: xs)
 
 let word = many letter <$> implode
-let word1 = many1 letter <$> implode |> map_label (fun _ -> "word")
+let word1 = many1 letter <$> implode |> label "word"
 
 let sepby1 p sep =
   p >>= fun x ->

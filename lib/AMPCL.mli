@@ -1,19 +1,24 @@
-type 'e error = Fail | Label of string | Custom of 'e
+module StringSet : Set.S with type elt = string
+
+type ('s, 'e) error = Label of StringSet.t * 's option | Custom of 'e
 
 type ('s, 'a, 'e) parser =
   | Parser of {
       unParse :
         'b 'ee.
         's list ->
-        ('a -> 's list -> 's list * ('b, 'ee error) result) ->
-        ('e error -> 's list -> 's list * ('b, 'ee error) result) ->
-        's list * ('b, 'ee error) result;
+        ('a -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
+        (('s, 'e) error -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
+        's list * ('b, ('s, 'ee) error) result;
     }
 
 val explode : string -> char list
 val implode : char list -> string
-val run' : (char, 'a, 'e) parser -> string -> char list * ('a, 'e error) result
-val run : (char, 'a, 'e) parser -> string -> ('a, 'e error) result
+
+val run' :
+  (char, 'a, 'e) parser -> string -> char list * ('a, (char, 'e) error) result
+
+val run : (char, 'a, 'e) parser -> string -> ('a, (char, 'e) error) result
 
 val ( >>= ) :
   ('s, 'a, 'e) parser -> ('a -> ('s, 'b, 'e) parser) -> ('s, 'b, 'e) parser
