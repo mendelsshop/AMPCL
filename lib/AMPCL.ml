@@ -5,17 +5,21 @@ module StringSet = Set.Make (String)
    for state so that we can get line numbers
    by parameterize I think I mean make this into a module paramaterized over those things
 *)
-type ('s, 'e) error = Label of StringSet.t * 's option | Custom of 'e
+type ('s, 'e) error =
+  | Label of StringSet.t * 's option * int
+  | Custom of 'e * int
+
+type 's state = { pos : int; input : 's list }
 
 (*We have to error generics, to make map_error work properly*)
 type ('s, 'a, 'e) parser =
   | Parser of {
       unParse :
         'b 'ee.
-        's list ->
-        ('a -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
-        (('s, 'e) error -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
-        's list * ('b, ('s, 'ee) error) result;
+        's state ->
+        ('a -> 's state -> 's state * ('b, ('s, 'ee) error) result) ->
+        (('s, 'e) error -> 's state -> 's state * ('b, ('s, 'ee) error) result) ->
+        's state * ('b, ('s, 'ee) error) result;
     }
 
 let ( & ) f g x = g (f x)
@@ -24,8 +28,11 @@ let ( & ) f g x = g (f x)
 let explode str = str |> String.to_seq |> List.of_seq
 let implode cs = cs |> List.to_seq |> String.of_seq
 
-let run' (Parser { unParse }) str : char list * ('a, (char, 'e) error) result =
-  unParse (str |> explode) (fun a s -> (s, Ok a)) (fun e s -> (s, Error e))
+let run' (Parser { unParse }) str : char state * ('a, (char, 'e) error) result =
+  unParse
+    { pos = 0; input = str |> explode }
+    (fun a s -> (s, Ok a))
+    (fun e s -> (s, Error e))
 
 let run p str = run' p str |> snd
 let return v = Parser { unParse = (fun s ok _ -> ok v s) }
@@ -45,7 +52,7 @@ let ( >>= ) (Parser { unParse = unParseP }) q =
 let bind f p = p >>= f
 
 let zero =
-  Parser { unParse = (fun s _ err -> err (Label (StringSet.empty, None)) s) }
+  Parser { unParse = (fun s _ err -> err (Label (StringSet.empty, None, 0)) s) }
 
 let map f = bind (f & return)
 let ( <$> ) p f = map f p
@@ -77,11 +84,12 @@ let map_error f (Parser { unParse = p }) =
     }
 
 (* let map_label f = map_error (function Label l -> Label (f l) | e -> e) *)
+let bigger a b x y = if a >= b then x else y
 
 let label e =
   map_error (function
-    | Label (_, a) -> Label (StringSet.singleton e, a)
-    | Custom e -> Custom e)
+    | Label (_, a, i) -> Label (StringSet.singleton e, a, i)
+    | Custom _ as e -> e)
 
 let alt_error : ('s, 'e) error -> ('s, 'e) error -> ('s, 'e) error =
  fun e1 e2 ->
@@ -92,10 +100,11 @@ let alt_error : ('s, 'e) error -> ('s, 'e) error -> ('s, 'e) error =
      type default = | Label of string | Fail | ...
      type 'e error = Custom of 'e list | Default of default list
   *)
-  | Custom c, _ | _, Custom c -> Custom c
-  | Label (l1, a1), Label (l2, a2) ->
+  | Custom (_, pos1), Custom (_, pos2) -> bigger pos1 pos2 e1 e2
+  | (Custom _ as c), _ | _, (Custom _ as c) -> c
+  | Label (l1, a1, p1), Label (l2, a2, p2) ->
       (* TODO: find the error that absorbed the most input *)
-      Label (StringSet.union l1 l2, Option.fold ~none:a2 ~some:(fun _ -> a1) a1)
+      Label (StringSet.union l1 l2, bigger p1 p2 a1 a2, max p1 p2)
 
 let ( <|> ) (Parser { unParse = p }) (Parser { unParse = q }) =
   Parser
@@ -121,23 +130,25 @@ let item =
   Parser
     {
       unParse =
-        (fun input ok err ->
+        (fun { input; pos } ok err ->
           match input with
-          | [] -> err (Label (StringSet.singleton "eof", None)) input
-          | s :: rest -> ok s rest);
+          | [] ->
+              err (Label (StringSet.singleton "eof", None, pos)) { input; pos }
+          | s :: rest -> ok s { input = rest; pos = pos + 1 });
     }
 
 let token f =
   Parser
     {
       unParse =
-        (fun input ok err ->
+        (fun { input; pos } ok err ->
           match input with
-          | [] -> err (Label (StringSet.singleton "eof", None)) input
+          | [] ->
+              err (Label (StringSet.singleton "eof", None, pos)) { input; pos }
           | s :: rest -> (
               match f s with
-              | Some e -> err (Label (e, Some s)) input
-              | _ -> ok s rest));
+              | Some e -> err (Label (e, Some s, pos)) { pos; input }
+              | _ -> ok s { input = rest; pos = pos + 1 }));
     }
 
 let sat p = token (fun s -> if p s then None else Some StringSet.empty)

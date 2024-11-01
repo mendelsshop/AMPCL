@@ -1,22 +1,26 @@
 module StringSet : Set.S with type elt = string
 
-type ('s, 'e) error = Label of StringSet.t * 's option | Custom of 'e
+type ('s, 'e) error =
+  | Label of StringSet.t * 's option * int
+  | Custom of 'e * int
+
+type 's state = { pos : int; input : 's list }
 
 type ('s, 'a, 'e) parser =
   | Parser of {
       unParse :
         'b 'ee.
-        's list ->
-        ('a -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
-        (('s, 'e) error -> 's list -> 's list * ('b, ('s, 'ee) error) result) ->
-        's list * ('b, ('s, 'ee) error) result;
+        's state ->
+        ('a -> 's state -> 's state * ('b, ('s, 'ee) error) result) ->
+        (('s, 'e) error -> 's state -> 's state * ('b, ('s, 'ee) error) result) ->
+        's state * ('b, ('s, 'ee) error) result;
     }
 
 val explode : string -> char list
 val implode : char list -> string
 
 val run' :
-  (char, 'a, 'e) parser -> string -> char list * ('a, (char, 'e) error) result
+  (char, 'a, 'e) parser -> string -> char state * ('a, (char, 'e) error) result
 
 val run : (char, 'a, 'e) parser -> string -> ('a, (char, 'e) error) result
 
