@@ -9,55 +9,55 @@ module type Show = sig
   val show : t -> string
 end
 
-module ErrorItem = struct
-  module type T = sig
-    type s
-    type t = Label of string | Token of s
-  end
-
-  module Make (S : sig
-    type t
-  end) : T with type s = S.t = struct
-    type s = S.t
-    type t = Label of string | Token of S.t
-  end
-
-  module Ord = struct
-    module type TOrd = sig
-      include T
-      include Set.OrderedType with type t := t
-    end
-
-    module From (T : T) (S : Set.OrderedType with type t = T.s) :
-      TOrd with type s = S.t and type t = T.t = struct
-      include T
-
-      let compare v1 v2 =
-        match (v1, v2) with
-        | Label l, Label l' -> String.compare l l'
-        | Token t, Token t' -> S.compare t t'
-        | _ -> 1
-    end
-
-    module Make (S : Set.OrderedType) = From (Make (S)) (S)
-  end
-
-  module Show = struct
-    module type TShow = sig
-      include T
-      include Show with type t := t
-    end
-
-    module From (T : T) (S : Show with type t = T.s) :
-      TShow with type s = S.t and type t = T.t = struct
-      include T
-
-      let show = function Label l -> l | Token t -> S.show t
-    end
-
-    module Make (S : Show) = From (Make (S)) (S)
-  end
-end
+(* module ErrorItem = struct *)
+(*   module type T = sig *)
+(*     type s *)
+(*     type t = Label of string | Token of s *)
+(*   end *)
+(**)
+(*   module Make (S : sig *)
+(*     type t *)
+(*   end) : T with type s = S.t = struct *)
+(*     type s = S.t *)
+(*     type t = Label of string | Token of S.t *)
+(*   end *)
+(**)
+(*   module Ord = struct *)
+(*     module type TOrd = sig *)
+(*       include T *)
+(*       include Set.OrderedType with type t := t *)
+(*     end *)
+(**)
+(*     module From (T : T) (S : Set.OrderedType with type t = T.s) : *)
+(*       TOrd with type s = S.t and type t = T.t = struct *)
+(*       include T *)
+(**)
+(*       let compare v1 v2 = *)
+(*         match (v1, v2) with *)
+(*         | Label l, Label l' -> String.compare l l' *)
+(*         | Token t, Token t' -> S.compare t t' *)
+(*         | _ -> 1 *)
+(*     end *)
+(**)
+(*     module Make (S : Set.OrderedType) = From (Make (S)) (S) *)
+(*   end *)
+(**)
+(*   module Show = struct *)
+(*     module type TShow = sig *)
+(*       include T *)
+(*       include Show with type t := t *)
+(*     end *)
+(**)
+(*     module From (T : T) (S : Show with type t = T.s) : *)
+(*       TShow with type s = S.t and type t = T.t = struct *)
+(*       include T *)
+(**)
+(*       let show = function Label l -> l | Token t -> S.show t *)
+(*     end *)
+(**)
+(*     module Make (S : Show) = From (Make (S)) (S) *)
+(*   end *)
+(* end *)
 
 (* module Error = struct *)
 (*   module type T = sig *)
@@ -123,16 +123,19 @@ end
 
 module Parser = struct
   module type T = sig
-    module S : Set.OrderedType
-    module E : Set.OrderedType
-    module ErrorItemT : ErrorItem.T with type s = S.t
-    module ErrorItemSet : Set.S with type elt = ErrorItemT.t
+    (* module S : Set.OrderedType *)
+    type s
+    type e
+    type error_item = Label of string | Token of s
 
-    type state = { pos : int; input : ErrorItemT.s list }
+    (* module ErrorItemT : ErrorItem.Ord.TOrd with type s = S.t *)
+    module ErrorItemSet : Set.S with type elt = error_item
+
+    type state = { pos : int; input : s list }
 
     type error =
-      | Default of ErrorItemSet.t * ErrorItemT.s option * int
-      | Custom of E.t * int
+      | Default of ErrorItemSet.t * s option * int
+      | Custom of e * int
 
     type 'a t =
       | Parser of {
@@ -149,13 +152,13 @@ module Parser = struct
     include T
 
     val label : string -> 'a t -> 'a t
-    val sat : (ErrorItemT.s -> bool) -> ErrorItemT.s t
+    val sat : (s -> bool) -> s t
     val return : 'a -> 'a t
     val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
     val map : ('a -> 'b) -> 'a t -> 'b t
     val ( <$> ) : 'a t -> ('a -> 'b) -> 'b t
     val zero : 'a t
-    val item : S.t t
+    val item : s t
     val bind : ('a -> 'b t) -> 'a t -> 'b t
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val alt : 'a t -> 'a t -> 'a t
@@ -175,7 +178,15 @@ module Parser = struct
     val many1 : 'a t -> 'a list t
   end
 
-  module MakeFull (T : T) : TFull with module S = T.S = struct
+  module MakeFull
+      (T : T)
+  (* : *)
+  (*   TFull *)
+  (*     with type s = T.s *)
+  (*      and type e = T.e *)
+  (*      and type error_item = T.error_item *)
+  (*      and module ErrorItemSet = T.ErrorItemSet *) =
+  struct
     include T
 
     let return v = Parser { unParse = (fun s ok _ -> ok v s) }
@@ -325,9 +336,6 @@ module Parser = struct
       p >>= fun x ->
       many p >>= fun xs -> return (x :: xs)
 
-    (* let word = many letter <$> implode *)
-    (* let word1 = many1 letter <$> implode |> label "word" *)
-
     let sepby1 p sep =
       p >>= fun x ->
       many (sep << p) >>= fun xs -> return (x :: xs)
@@ -348,28 +356,40 @@ module Parser = struct
   module Make
       (S : Set.OrderedType)
       (E : Set.OrderedType)
-  (* : TFull with module S = S  *) =
+  (* : *)
+  (* TFull with type s = S.t and type e = E.t *)
+  (* with module S = S *) =
   struct
     (* make module for this, so we can make an ord and show instance *)
 
-    module T : T with module S = S = struct
-      module S = S
-      module E = E
+    module T : T with type s = S.t and type e = E.t (* with module S = S *) =
+    struct
+      type error_item = Label of string | Token of S.t
+      type s = S.t
+      type e = E.t
 
-      module ErrorItemT = struct
-        include ErrorItem.Make (S)
-        include ErrorItem.Ord.Make (S)
-      end
+      (* module ErrorItemT = struct *)
+      (*   include ErrorItem.Make (S) *)
+      (*   include ErrorItem.Ord.Make (S) *)
+      (* end *)
 
-      module ErrorItemSet = Set.Make (ErrorItemT)
+      module ErrorItemSet = Set.Make (struct
+        type t = error_item
+
+        let compare v1 v2 =
+          match (v1, v2) with
+          | Label l, Label l' -> String.compare l l'
+          | Token t, Token t' -> S.compare t t'
+          | _ -> 1
+      end)
 
       (* make module for this, so we can make an ord and show instance *)
 
-      type state = { pos : int; input : S.t list }
+      type state = { pos : int; input : s list }
 
       type error =
-        | Default of ErrorItemSet.t * S.t option * int
-        | Custom of E.t * int
+        | Default of ErrorItemSet.t * s option * int
+        | Custom of e * int
 
       (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
 
@@ -389,20 +409,13 @@ module Parser = struct
 
   module Show = struct
     module type T = sig
-      module S : sig
-        include Show
-        include Set.OrderedType with type t := t
-      end
+      include T
 
-      module E : sig
-        include Show
-        include Set.OrderedType with type t := t
-      end
-
-      module ErrorItem : sig
-        include ErrorItem.Ord.TOrd with type s = S.t
-        include Show with type t := t
-      end
+      val show_error : error -> string
+      (* module ErrorItemT : sig *)
+      (*   include ErrorItem.Ord.TOrd with type s = S.t *)
+      (*   include Show with type t := t *)
+      (* end *)
 
       (* include *)
       (*   T with module S := S and module E := E and module ErrorItem := ErrorItem *)
@@ -414,43 +427,59 @@ module Parser = struct
     end) (E : sig
       include Show
       include Set.OrderedType with type t := t
-    end) =
+    end)
+    (* : sig *)
+    (*   include TFull with type s = S.t *)
+    (*   (* with module S = S' *) *)
+    (*   val show_error : error -> string *)
+    (* end *) =
     struct
-      module S = S
-      module E = E
+      module TInner = struct
+        type s = S.t
+        type error_item = Label of string | Token of s
+        type e = E.t
 
-      module ErrorItem : sig
-        include ErrorItem.T with type s := S.t
-        include Show with type t := t
-        include Set.OrderedType with type t := t
-      end = struct
-        module E = ErrorItem.Make (S)
-        include ErrorItem.Ord.From (E) (S)
-        include ErrorItem.Show.From (E) (S)
+        module ErrorItemSet = Set.Make (struct
+          type t = error_item
+
+          let compare v1 v2 =
+            match (v1, v2) with
+            | Label l, Label l' -> String.compare l l'
+            | Token t, Token t' -> S.compare t t'
+            | _ -> 1
+        end)
+
+        (* make module for this, so we can make an ord and show instance *)
+
+        type state = { pos : int; input : s list }
+
+        type error =
+          | Default of ErrorItemSet.t * s option * int
+          | Custom of e * int
+
+        (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
+
+        type 'a t =
+          | Parser of {
+              unParse :
+                'b 'ee.
+                state ->
+                ('a -> state -> state * ('b, error) result) ->
+                (error -> state -> state * ('b, error) result) ->
+                state * ('b, error) result;
+            }
       end
 
-      module ErrorItemSet = Set.Make (ErrorItem)
-      include ErrorItem
+      module T
+      (* : *)
+      (*   TFull *)
+      (*     with type s = S.t *)
+      (*      and type e = E.t *)
+      (*      and type error_item = TInner.error_item *)
+      (* and module ErrorItemSet = TInner.ErrorItemSet  *) =
+        MakeFull (TInner)
 
-      (* make module for this, so we can make an ord and show instance *)
-
-      type state = { pos : int; input : S.t list }
-
-      type error =
-        | Default of ErrorItemSet.t * S.t option * int
-        | Custom of E.t * int
-
-      (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
-
-      type 'a t =
-        | Parser of {
-            unParse :
-              'b 'ee.
-              state ->
-              ('a -> state -> state * ('b, error) result) ->
-              (error -> state -> state * ('b, error) result) ->
-              state * ('b, error) result;
-          }
+      include T
 
       (* include Parser.ErrorItemOrd *)
 
@@ -463,30 +492,49 @@ module Parser = struct
       (* include Parser *)
       (* module ErrorItemOrdShowSet = Set.Make (ErrorItemOrdShow) *)
 
-      (*   let show_error error = *)
-      (*     match error with *)
-      (*     | Custom (e, _) -> E.show e *)
-      (*     | Default (expected, actual, i) -> *)
-      (*         "expected " *)
-      (*         ^ (expected |> ErrorItemOrdShowSet.to_list *)
-      (*           |> List.map ErrorItemOrdShow.show *)
-      (*           |> String.concat " or ") *)
-      (*         ^ Option.fold ~none:"" *)
-      (*             ~some:(fun actual -> ", got " ^ S.show actual) *)
-      (*             actual *)
-      (*         ^ " at " ^ string_of_int i *)
+      let show_error error =
+        let show = function Label l -> l | Token t -> S.show t in
+        match error with
+        | Custom (e, _) -> E.show e
+        | Default (expected, actual, i) ->
+            "expected "
+            ^ (expected |> TInner.ErrorItemSet.to_list |> List.map show
+             |> String.concat " or ")
+            ^ Option.fold ~none:""
+                ~some:(fun actual -> ", got " ^ S.show actual)
+                actual
+            ^ " at " ^ string_of_int i
     end
   end
 
   module Char = struct
-    include Char
+    type t = char
 
-    let show = String.make 1
+    let compare : t -> t -> int = Char.compare
+
+    (* let show : t -> string = String.make 1 *)
+  end
+
+  module type CharParerT = sig
+    include TFull
+
+    val letter : char t
+    val digit : char t
+    val lower : char t
+    val upper : char t
+    val alphanum : char t
+    val word : string t
+    val word1 : string t
+    val string : string -> string t
+    val char : char -> char t
   end
 
   module CharParser (E : Set.OrderedType) = struct
-    module Parser : TFull with module S := Char
-    (* and module ErrorItemT = ErrorItem.Ord.Make(Char) = *) =
+    module Parser
+    (* : *)
+    (* TFull with type s = char and type e = E.t *)
+    (*      and module ErrorItemT = ErrorItem.Ord.Make(Char *)
+    (* ) *) =
       Make (Char) (E)
 
     include Parser
@@ -497,6 +545,61 @@ module Parser = struct
     let upper = sat (fun x -> 'A' <= x && x <= 'Z') |> label "upper case letter"
     let letter = upper <|> lower |> label "letter"
     let alphanum = letter <|> digit |> label " digit"
+    let word = many letter <$> implode
+    let word1 = many1 letter <$> implode |> label "word"
+
+    let string str =
+      let rec string_i x =
+        match x with
+        | [] -> return ""
+        | x :: xs ->
+            char x >>= fun _ ->
+            string_i xs >>= fun xs -> return (String.make 1 x ^ xs)
+      in
+      let exp_str : char list = List.of_seq (String.to_seq str) in
+      string_i exp_str |> label str
+
+    let run' (Parser { unParse }) str =
+      unParse
+        { pos = 0; input = str |> explode }
+        (fun a s -> (s, Ok a))
+        (fun e s -> (s, Error e))
+
+    let run p str = run' p str |> snd
+  end
+
+  module ShowCharParser (E' : sig
+    include Show
+    include Set.OrderedType with type t := t
+  end) =
+  struct
+    module Char = struct
+      type t = char
+
+      let compare : t -> t -> int = Char.compare
+      let show : t -> string = String.make 1
+    end
+
+    module Parser (* : TFull with type s = char *) = Make (Char) (E')
+    include Parser
+    (* module T : CharParerT = CharParser (E') *)
+
+    (* module T' = struct *)
+    (*   include T *)
+    (*   module S = Char *)
+    (* end *)
+
+    module Show' = Show.Make (Char) (E')
+    include Show'
+
+    let char x = sat (fun y -> x == y) |> label (String.make 1 x)
+    let digit = sat (fun x -> '0' <= x && x <= '9') |> label "digit"
+    let lower = sat (fun x -> 'a' <= x && x <= 'z') |> label "lower case letter"
+    let upper = sat (fun x -> 'A' <= x && x <= 'Z') |> label "upper case letter"
+    let letter = upper <|> lower |> label "letter"
+    let alphanum = letter <|> digit |> label " digit"
+    let word = many letter <$> implode
+    let word1 = many1 letter <$> implode |> label "word"
 
     let string str =
       let rec string_i x =
@@ -516,14 +619,5 @@ module Parser = struct
         (fun e s -> (s, Error e))
 
     let run p str = run' p str |> snd
-  end
-
-  module ShowCharParser (E : sig
-    include Show
-    include Set.OrderedType with type t := t
-  end) =
-  struct
-    include CharParser (E)
-    (* include Show.Make (Char) (E) *)
   end
 end
