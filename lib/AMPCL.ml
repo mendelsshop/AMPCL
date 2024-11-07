@@ -9,13 +9,17 @@ module type Show = sig
 end
 
 module type Stream = sig
+  (* TODO: constrain to ord *)
   type token
+
+  (* TODO: constrain to ord *)
   type tokens
   type t
 
   val take1 : t -> (token * t) option
   val taken : int -> t -> (tokens * t) option
   val len : tokens -> int
+  val toTokens : tokens -> token list
 end
 
 (* TODO: instead of paramterizing over individual input type, parameterize over input stream *)
@@ -24,14 +28,14 @@ module Parser = struct
     module Stream : Stream
 
     type e
-    type error_item = Label of string | Token of Stream.token
+    type error_item = Label of string | Tokens of Stream.token list | EOF
 
     module ErrorItemSet : Set.S with type elt = error_item
 
     type state = { pos : int; input : Stream.t }
 
     type error =
-      | Default of ErrorItemSet.t * Stream.token option * int
+      | Default of ErrorItemSet.t * error_item option * int
       | Custom of e * int
 
     type 'a t =
@@ -45,6 +49,7 @@ module Parser = struct
         }
 
     val label : string -> 'a t -> 'a t
+    val chunk : Stream.tokens -> Stream.tokens t
     val sat : (Stream.token -> bool) -> Stream.token t
     val return : 'a -> 'a t
     val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
@@ -52,6 +57,13 @@ module Parser = struct
     val ( <$> ) : 'a t -> ('a -> 'b) -> 'b t
     val zero : 'a t
     val item : Stream.token t
+    val token : (Stream.token -> ErrorItemSet.t option) -> Stream.token t
+
+    (* val tokens : *)
+    (*   (Stream.tokens -> Stream.tokens -> bool) -> *)
+    (*   Stream.tokens -> *)
+    (*   Stream.tokens t *)
+
     val bind : ('a -> 'b t) -> 'a t -> 'b t
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val alt : 'a t -> 'a t -> 'a t
@@ -81,7 +93,7 @@ module Parser = struct
     module Stream = Stream
 
     type e = E.t
-    type error_item = Label of string | Token of Stream.token
+    type error_item = Label of string | Tokens of Stream.token list | EOF
 
     module ErrorItemSet = Set.Make (struct
       type t = error_item
@@ -89,14 +101,14 @@ module Parser = struct
       let compare v1 v2 =
         match (v1, v2) with
         | Label l, Label l' -> String.compare l l'
-        | Token t, Token t' -> S.compare t t'
+        | Tokens t, Tokens t' -> List.compare S.compare t t'
         | _ -> 1
     end)
 
     type state = { pos : int; input : Stream.t }
 
     type error =
-      | Default of ErrorItemSet.t * Stream.token option * int
+      | Default of ErrorItemSet.t * error_item option * int
       | Custom of e * int
 
     (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
@@ -134,6 +146,28 @@ module Parser = struct
             (fun s _ err -> err (Default (ErrorItemSet.empty, None, 0)) s);
         }
 
+    let tokens f tts =
+      Parser
+        {
+          unParse =
+            (fun ({ input; pos } as s) ok err ->
+              let unexpected pos' u =
+                let ps =
+                  Tokens (tts |> Stream.toTokens) |> ErrorItemSet.singleton
+                in
+                Default (ps, Some u, pos')
+              in
+              let len = Stream.len tts in
+              match Stream.taken len input with
+              | None -> err (unexpected pos EOF) s
+              | Some (tts', input') ->
+                  if f tts tts' then ok tts' { input = input'; pos = pos + len }
+                  else
+                    let ps = Tokens (tts' |> Stream.toTokens) in
+                    err (unexpected pos ps) s);
+        }
+
+    let chunk = tokens ( = )
     let map f = bind (f & return)
     let ( <$> ) p f = map f p
 
@@ -240,7 +274,8 @@ module Parser = struct
                     { input; pos }
               | Some (s, rest) -> (
                   match f s with
-                  | Some e -> err (Default (e, Some s, pos)) { pos; input }
+                  | Some e ->
+                      err (Default (e, Some (Tokens [ s ]), pos)) { pos; input }
                   | _ -> ok s { input = rest; pos = pos + 1 }));
         }
 
@@ -303,7 +338,11 @@ module Parser = struct
       include T
 
       let show_error error =
-        let show = function Label l -> l | Token t -> S.show t in
+        let show = function
+          | Label l -> l
+          | Tokens t -> t |> List.map S.show |> String.concat ""
+          | EOF -> "eof"
+        in
         match error with
         | Custom (e, _) -> E.show e
         | Default (expected, actual, i) ->
@@ -311,7 +350,7 @@ module Parser = struct
             ^ (expected |> ErrorItemSet.to_list |> List.map show
              |> String.concat " or ")
             ^ Option.fold ~none:", got eof"
-                ~some:(fun actual -> ", got " ^ S.show actual)
+                ~some:(fun actual -> ", got " ^ show actual)
                 actual
             ^ " at " ^ string_of_int i
     end
@@ -345,6 +384,8 @@ module Parser = struct
       type t = string
       type tokens = string
 
+      let toTokens = explode
+
       let take1 : t -> (token * t) option =
        fun i ->
         try Some (String.get i 0, String.sub i 1 (String.length i - 1))
@@ -356,11 +397,12 @@ module Parser = struct
         match n with
         | _ when n <= 0 -> Some (String.empty, i)
         | _ when len = 0 -> None
-        | _ -> (
+        | _ ->
             (* TODO: make sure this math is correct *)
-            let n, rest = if n > len then (len, 0) else (n, n - len) in
-            try Some (String.sub i n 0, String.sub i rest n)
-            with Invalid_argument _ -> None)
+            let n, rest = if n > len then (len, 0) else (n, len - n) in
+
+            Some (String.sub i 0 n, String.sub i n rest)
+      (* with Invalid_argument _ -> None) *)
 
       let len = String.length
     end
@@ -370,6 +412,7 @@ module Parser = struct
       type t = char list
       type tokens = char list
 
+      let toTokens = Fun.id
       let take1 = function s :: rest -> Some (s, rest) | [] -> None
 
       let taken n =
@@ -424,17 +467,7 @@ module Parser = struct
       let alphanum = letter <|> digit |> label " digit"
       let word = many letter <$> implode
       let word1 = many1 letter <$> implode |> label "word"
-
-      let string str =
-        let rec string_i x =
-          match x with
-          | [] -> return ""
-          | x :: xs ->
-              char x >>= fun _ ->
-              string_i xs >>= fun xs -> return (String.make 1 x ^ xs)
-        in
-        let exp_str : char list = List.of_seq (String.to_seq str) in
-        string_i exp_str |> label str
+      let string = chunk
     end
 
     module Show = struct
