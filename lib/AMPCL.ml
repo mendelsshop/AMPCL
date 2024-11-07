@@ -83,6 +83,7 @@ module Parser = struct
     val many1 : 'a t -> 'a list t
     val run' : 'a t -> Stream.t -> state * ('a, error) result
     val run : 'a t -> Stream.t -> ('a, error) result
+    val eof : unit t
   end
 
   module Make
@@ -138,6 +139,20 @@ module Parser = struct
         }
 
     let bind f p = p >>= f
+
+    let eof =
+      Parser
+        {
+          unParse =
+            (fun ({ input; pos } as s) ok err ->
+              match Stream.take1 input with
+              | None -> ok () s
+              | Some (x, _) ->
+                  err
+                    (Default
+                       (ErrorItemSet.singleton EOF, Some (Tokens [ x ]), pos))
+                    s);
+        }
 
     let zero =
       Parser
