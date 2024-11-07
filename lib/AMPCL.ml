@@ -42,13 +42,13 @@ module Parser = struct
         }
 
     val label : string -> 'a t -> 'a t
-    val sat : (Stream.token -> bool) -> Stream.t t
+    val sat : (Stream.token -> bool) -> Stream.token t
     val return : 'a -> 'a t
     val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
     val map : ('a -> 'b) -> 'a t -> 'b t
     val ( <$> ) : 'a t -> ('a -> 'b) -> 'b t
     val zero : 'a t
-    val item : Stream.t t
+    val item : Stream.token t
     val bind : ('a -> 'b t) -> 'a t -> 'b t
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val alt : 'a t -> 'a t -> 'a t
@@ -66,6 +66,8 @@ module Parser = struct
     val check : ('a -> bool) -> 'a t -> 'a t
     val many : 'a t -> 'a list t
     val many1 : 'a t -> 'a list t
+    val run' : 'a t -> Stream.t -> state * ('a, error) result
+    val run : 'a t -> Stream.t -> ('a, error) result
   end
 
   module Make
@@ -268,27 +270,34 @@ module Parser = struct
 
     let check predicate p =
       p >>= fun x -> if predicate x then return x else zero
+
+    let run' (Parser { unParse }) input =
+      unParse { pos = 0; input }
+        (fun a s -> (s, Ok a))
+        (fun e s -> (s, Error e))
+
+    let run p str = run' p str |> snd
   end
 
   module Show = struct
-    module type T = sig
+    module type TShow = sig
       include T
 
       val show_error : error -> string
     end
 
-    module Make
-        (Stream : Stream)
+    module From
+        (T : T)
         (S : sig
-          include Show with type t = Stream.token
+          include Show with type t = T.Stream.token
           include Set.OrderedType with type t := t
         end)
         (E : sig
-          include Show
+          include Show with type t = T.e
           include Set.OrderedType with type t := t
         end) =
     struct
-      include Make (Stream) (S) (E)
+      include T
 
       let show_error error =
         let show = function Label l -> l | Token t -> S.show t in
@@ -303,9 +312,25 @@ module Parser = struct
                 actual
             ^ " at " ^ string_of_int i
     end
+
+    module Make
+        (Stream : Stream)
+        (S : sig
+          include Show with type t = Stream.token
+          include Set.OrderedType with type t := t
+        end)
+        (E : sig
+          include Show
+          include Set.OrderedType with type t := t
+        end) =
+    struct
+      module T = Make (Stream) (S) (E)
+      include From (T) (S) (E)
+      include T
+    end
   end
 
-  module String = struct
+  module Char = struct
     module Char = struct
       include Char
 
@@ -321,22 +346,32 @@ module Parser = struct
         with Invalid_argument _ -> None
     end
 
-    module type T = sig
-      include T
+    module CharListStream = struct
+      type token = char
+      type t = char list
 
-      val letter : char t
-      val digit : char t
-      val lower : char t
-      val upper : char t
-      val alphanum : char t
+      let take1 = function s :: rest -> Some (s, rest) | [] -> None
+    end
+
+    module type CharStream = Stream with type token = char
+
+    module type TChar = sig
+      module Stream : CharStream
+      include T with module Stream := Stream
+
+      val letter : Stream.token t
+      val digit : Stream.token t
+      val lower : Stream.token t
+      val upper : Stream.token t
+      val alphanum : Stream.token t
       val word : string t
       val word1 : string t
       val string : string -> string t
-      val char : char -> char t
+      val char : Stream.token -> Stream.token t
     end
 
-    module Make (E : Set.OrderedType) = struct
-      include Make (StringStream) (Char) (E)
+    module Make (Stream : CharStream) (E : Set.OrderedType) = struct
+      include Make (Stream) (Char) (E)
 
       let char x = sat (fun y -> x == y) |> label (String.make 1 x)
       let digit = sat (fun x -> '0' <= x && x <= '9') |> label "digit"
@@ -362,22 +397,14 @@ module Parser = struct
         in
         let exp_str : char list = List.of_seq (String.to_seq str) in
         string_i exp_str |> label str
-
-      let run' (Parser { unParse }) str =
-        unParse
-          { pos = 0; input = str  }
-          (fun a s -> (s, Ok a))
-          (fun e s -> (s, Error e))
-
-      let run p str = run' p str |> snd
     end
 
     module Show = struct
-      module type T = sig
-        include T
+      module type TCharShow = sig
+        include TChar
 
         include
-          Show.T
+          Show.TShow
             with module Stream := Stream
              and type e := e
              and type error_item := error_item
@@ -387,13 +414,32 @@ module Parser = struct
              and type 'a t := 'a t
       end
 
-      module Make (E' : sig
-        include Show
-        include Set.OrderedType with type t := t
-      end) =
+      module Make
+          (Stream : CharStream)
+          (E : sig
+            include Show
+            include Set.OrderedType with type t := t
+          end) =
       struct
-        include Show.Make (StringStream) (Char) (E')
-        include Make (E')
+        module T = Make (Stream) (E)
+        include Show.From (T) (Char) (E)
+        include T
+      end
+    end
+
+    module String = struct
+      module Make = Make (StringStream)
+
+      module Show = struct
+        module Make = Show.Make (StringStream)
+      end
+    end
+
+    module CharList = struct
+      module Make = Make (CharListStream)
+
+      module Show = struct
+        module Make = Show.Make (CharListStream)
       end
     end
   end
