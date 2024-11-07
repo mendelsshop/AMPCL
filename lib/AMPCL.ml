@@ -8,19 +8,27 @@ module type Show = sig
   val show : t -> string
 end
 
+module type Stream = sig
+  type token
+  type t
+
+  val take1 : t -> (token * t) option
+end
+
 (* TODO: instead of paramterizing over individual input type, parameterize over input stream *)
 module Parser = struct
   module type T = sig
-    type s
+    module Stream : Stream
+
     type e
-    type error_item = Label of string | Token of s
+    type error_item = Label of string | Token of Stream.token
 
     module ErrorItemSet : Set.S with type elt = error_item
 
-    type state = { pos : int; input : s list }
+    type state = { pos : int; input : Stream.t }
 
     type error =
-      | Default of ErrorItemSet.t * s option * int
+      | Default of ErrorItemSet.t * Stream.token option * int
       | Custom of e * int
 
     type 'a t =
@@ -34,13 +42,13 @@ module Parser = struct
         }
 
     val label : string -> 'a t -> 'a t
-    val sat : (s -> bool) -> s t
+    val sat : (Stream.token -> bool) -> Stream.t t
     val return : 'a -> 'a t
     val ( >>= ) : 'a t -> ('a -> 'b t) -> 'b t
     val map : ('a -> 'b) -> 'a t -> 'b t
     val ( <$> ) : 'a t -> ('a -> 'b) -> 'b t
     val zero : 'a t
-    val item : s t
+    val item : Stream.t t
     val bind : ('a -> 'b t) -> 'a t -> 'b t
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val alt : 'a t -> 'a t -> 'a t
@@ -60,10 +68,15 @@ module Parser = struct
     val many1 : 'a t -> 'a list t
   end
 
-  module Make (S : Set.OrderedType) (E : Set.OrderedType) = struct
-    type s = S.t
+  module Make
+      (Stream : Stream)
+      (S : Set.OrderedType with type t = Stream.token)
+      (E : Set.OrderedType) =
+  struct
+    module Stream = Stream
+
     type e = E.t
-    type error_item = Label of string | Token of s
+    type error_item = Label of string | Token of Stream.token
 
     module ErrorItemSet = Set.Make (struct
       type t = error_item
@@ -75,10 +88,10 @@ module Parser = struct
         | _ -> 1
     end)
 
-    type state = { pos : int; input : s list }
+    type state = { pos : int; input : Stream.t }
 
     type error =
-      | Default of ErrorItemSet.t * s option * int
+      | Default of ErrorItemSet.t * Stream.token option * int
       | Custom of e * int
 
     (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
@@ -202,12 +215,12 @@ module Parser = struct
         {
           unParse =
             (fun { input; pos } ok err ->
-              match input with
-              | [] ->
+              match Stream.take1 input with
+              | None ->
                   err
                     (Default (ErrorItemSet.singleton (Label "eof"), None, pos))
                     { input; pos }
-              | s :: rest -> ok s { input = rest; pos = pos + 1 });
+              | Some (s, rest) -> ok s { input = rest; pos = pos + 1 });
         }
 
     let token f =
@@ -215,12 +228,12 @@ module Parser = struct
         {
           unParse =
             (fun { input; pos } ok err ->
-              match input with
-              | [] ->
+              match Stream.take1 input with
+              | None ->
                   err
                     (Default (ErrorItemSet.singleton (Label "eof"), None, pos))
                     { input; pos }
-              | s :: rest -> (
+              | Some (s, rest) -> (
                   match f s with
                   | Some e -> err (Default (e, Some s, pos)) { pos; input }
                   | _ -> ok s { input = rest; pos = pos + 1 }));
@@ -264,15 +277,18 @@ module Parser = struct
       val show_error : error -> string
     end
 
-    module Make (S : sig
-      include Show
-      include Set.OrderedType with type t := t
-    end) (E : sig
-      include Show
-      include Set.OrderedType with type t := t
-    end) =
+    module Make
+        (Stream : Stream)
+        (S : sig
+          include Show with type t = Stream.token
+          include Set.OrderedType with type t := t
+        end)
+        (E : sig
+          include Show
+          include Set.OrderedType with type t := t
+        end) =
     struct
-      include Make (S) (E)
+      include Make (Stream) (S) (E)
 
       let show_error error =
         let show = function Label l -> l | Token t -> S.show t in
@@ -282,18 +298,27 @@ module Parser = struct
             "expected "
             ^ (expected |> ErrorItemSet.to_list |> List.map show
              |> String.concat " or ")
-            ^ Option.fold ~none:""
+            ^ Option.fold ~none:", got eof"
                 ~some:(fun actual -> ", got " ^ S.show actual)
                 actual
             ^ " at " ^ string_of_int i
     end
   end
 
-  module Char = struct
+  module String = struct
     module Char = struct
       include Char
 
       let show = String.make 1
+    end
+
+    module StringStream = struct
+      type token = char
+      type t = string
+
+      let take1 i =
+        try Some (String.get i 0, String.sub i 1 (String.length i - 1))
+        with Invalid_argument _ -> None
     end
 
     module type T = sig
@@ -311,7 +336,7 @@ module Parser = struct
     end
 
     module Make (E : Set.OrderedType) = struct
-      include Make (Char) (E)
+      include Make (StringStream) (Char) (E)
 
       let char x = sat (fun y -> x == y) |> label (String.make 1 x)
       let digit = sat (fun x -> '0' <= x && x <= '9') |> label "digit"
@@ -340,7 +365,7 @@ module Parser = struct
 
       let run' (Parser { unParse }) str =
         unParse
-          { pos = 0; input = str |> explode }
+          { pos = 0; input = str  }
           (fun a s -> (s, Ok a))
           (fun e s -> (s, Error e))
 
@@ -353,7 +378,7 @@ module Parser = struct
 
         include
           Show.T
-            with type s := s
+            with module Stream := Stream
              and type e := e
              and type error_item := error_item
              and module ErrorItemSet := ErrorItemSet
@@ -367,7 +392,7 @@ module Parser = struct
         include Set.OrderedType with type t := t
       end) =
       struct
-        include Show.Make (Char) (E')
+        include Show.Make (StringStream) (Char) (E')
         include Make (E')
       end
     end
