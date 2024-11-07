@@ -10,9 +10,12 @@ end
 
 module type Stream = sig
   type token
+  type tokens
   type t
 
   val take1 : t -> (token * t) option
+  val taken : int -> t -> (tokens * t) option
+  val len : tokens -> int
 end
 
 (* TODO: instead of paramterizing over individual input type, parameterize over input stream *)
@@ -340,17 +343,52 @@ module Parser = struct
     module StringStream = struct
       type token = char
       type t = string
+      type tokens = string
 
-      let take1 i =
+      let take1 : t -> (token * t) option =
+       fun i ->
         try Some (String.get i 0, String.sub i 1 (String.length i - 1))
         with Invalid_argument _ -> None
+
+      let taken : int -> t -> (tokens * t) option =
+       fun n i ->
+        let len = String.length i in
+        match n with
+        | _ when n <= 0 -> Some (String.empty, i)
+        | _ when len = 0 -> None
+        | _ -> (
+            (* TODO: make sure this math is correct *)
+            let n, rest = if n > len then (len, 0) else (n, n - len) in
+            try Some (String.sub i n 0, String.sub i rest n)
+            with Invalid_argument _ -> None)
+
+      let len = String.length
     end
 
     module CharListStream = struct
       type token = char
       type t = char list
+      type tokens = char list
 
       let take1 = function s :: rest -> Some (s, rest) | [] -> None
+
+      let taken n =
+        let split n = function
+          | s when n <= 0 -> ([], s)
+          | s ->
+              let rec split n = function
+                | [] -> ([], [])
+                | s :: xs when n = 1 -> ([ s ], xs)
+                | s :: xs ->
+                    let s', xs' = split (n - 1) xs in
+                    (s :: s', xs')
+              in
+              split n s
+        in
+        function
+        | s when n <= 0 -> Some ([], s) | [] -> None | i -> Some (split n i)
+
+      let len = List.length
     end
 
     module type CharStream = Stream with type token = char
