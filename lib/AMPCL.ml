@@ -373,11 +373,24 @@ module Parser = struct
 
       let show_input i input =
         let pos = reach_offset i input in
-        string_of_int (fst pos).line ^ Option.value ~default:"" (snd pos)
+        string_of_int (fst pos).line
+        ^ ":"
+        ^ string_of_int (fst pos).column
+        ^ ":\n"
+        ^ Option.fold
+            ~some:(fun s ->
+              "  |\n"
+              ^ string_of_int (fst pos).line
+              ^ " | " ^ s ^ "\n  |"
+              ^ String.make (fst pos).column ' '
+              ^ "^\n")
+            ~none:"" (snd pos)
 
       let show_error error =
         let show = function
-          | Label l -> l
+          | Label l ->
+              print_endline "label";
+              l
           | Tokens t -> t |> List.map S.show |> String.concat ""
           | EOF -> "eof"
         in
@@ -387,8 +400,8 @@ module Parser = struct
             "expected "
             ^ (expected |> ErrorItemSet.to_list |> List.map show
              |> String.concat " or ")
-            ^ Option.fold ~none:", got eof"
-                ~some:(fun actual -> ", got " ^ show actual)
+            ^ Option.fold ~none:"\ngot eof"
+                ~some:(fun actual -> "\ngot " ^ show actual)
                 actual
 
       let run_show p input =
@@ -418,7 +431,12 @@ module Parser = struct
     module Char = struct
       include Char
 
-      let show = String.make 1
+      let show c =
+        match c with
+        | '\t' -> "<tab>"
+        | '\n' -> "<newline>"
+        | ' ' -> "<space>"
+        | _ -> String.make 1 c
     end
 
     module StringStream = struct
@@ -444,25 +462,48 @@ module Parser = struct
             let n, rest = if n > len then (len, 0) else (n, len - n) in
 
             Some (String.sub i 0 n, String.sub i n rest)
-      (* with Invalid_argument _ -> None) *)
 
       let reach_offset n i =
+        let len = String.length i in
         let line_number =
           let rec inner line start =
             try
               let newline = String.index_from i start '\n' in
-              if newline > n then line
-              else inner (line + 1) (start + newline 
-              )
+              if newline >= n then line
+              else inner (line + 1) (start + newline + 1)
             with Not_found | Invalid_argument _ -> line
           in
-          inner 1 1
+          inner 1 0
         in
 
-        let start_index = String.rindex_from i n '\n' in
-        let end_index = String.index_from i n '\n' in
-        let substr = String.sub i (start_index ) (end_index - start_index - 1) in
-        ({ line = line_number; column = 0 }, Some (if substr = "" then "<empty line>" else substr))
+        let start =
+          try
+            String.rindex_from_opt i (n - 1) '\n'
+            |> Option.fold ~some:(( + ) 1) ~none:0
+          with Invalid_argument _ -> 0
+        in
+        let end_index =
+          String.index_from_opt i n '\n' |> Option.fold ~some:Fun.id ~none:len
+        in
+        let colum_index = n - start in
+        let substr = String.sub i start (end_index - start) in
+        let substr = substr |> explode in
+        let substr = substr |> List.mapi (fun a b -> (a, b)) in
+        let colum_index, substr =
+          substr
+          |> List.fold_left
+               (fun (c : int * char list) (i : int * char) ->
+                 ( (if fst i >= colum_index then fst c
+                    else if snd i = '\t' then fst c + 4
+                    else fst c + 1),
+                   if snd i = '\t' then
+                     snd c @ (' ' :: ' ' :: ' ' :: ' ' :: [ ' ' ])
+                   else snd c @ [ snd i ] ))
+               (0, [])
+        in
+        let substr = substr |> implode in
+        ( { line = line_number; column = colum_index + 1 },
+          Some (if substr = "" then "<empty line>" else substr) )
 
       let reach_offset_no_line _n _i = failwith ""
       let len = String.length
@@ -515,7 +556,10 @@ module Parser = struct
     module Make (Stream : CharStream) (E : Set.OrderedType) = struct
       include Make (Stream) (Char) (E)
 
-      let char x = sat (fun y -> x == y) |> label (String.make 1 x)
+      let char x =
+        token (fun y ->
+            if x = y then None else Some (ErrorItemSet.singleton (Tokens [ x ])))
+
       let digit = sat (fun x -> '0' <= x && x <= '9') |> label "digit"
 
       let lower =
