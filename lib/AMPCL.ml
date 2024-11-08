@@ -24,6 +24,8 @@ end
 
 (* TODO: instead of paramterizing over individual input type, parameterize over input stream *)
 module Parser = struct
+  type pos = { column : int; line : int }
+
   module type T = sig
     module Stream : Stream
 
@@ -333,14 +335,28 @@ module Parser = struct
   end
 
   module Show = struct
+    module type ShowStream = sig
+      include Stream
+
+      val reach_offset : int -> t -> pos * string option
+      val reach_offset_no_line : int -> t -> pos
+    end
+
     module type TShow = sig
-      include T
+      module Stream : ShowStream
+      include T with module Stream := Stream
 
       val show_error : error -> string
+      val show_input : int -> state -> string
+      val run_show : 'a t -> Stream.t -> ('a, string) result
     end
 
     module From
         (T : T)
+        (Stream : ShowStream
+                    with type t = T.Stream.t
+                     and type token = T.Stream.token
+                     and type tokens = T.Stream.tokens)
         (S : sig
           include Show with type t = T.Stream.token
           include Set.OrderedType with type t := t
@@ -350,7 +366,14 @@ module Parser = struct
           include Set.OrderedType with type t := t
         end) =
     struct
+      include Stream
       include T
+
+      let get_index = function Default (_, _, i) -> i | Custom (_, i) -> i
+
+      let show_input i input =
+        let pos = reach_offset i input in
+        string_of_int (fst pos).line ^ Option.value ~default:"" (snd pos)
 
       let show_error error =
         let show = function
@@ -360,18 +383,22 @@ module Parser = struct
         in
         match error with
         | Custom (e, _) -> E.show e
-        | Default (expected, actual, i) ->
+        | Default (expected, actual, _i) ->
             "expected "
             ^ (expected |> ErrorItemSet.to_list |> List.map show
              |> String.concat " or ")
             ^ Option.fold ~none:", got eof"
                 ~some:(fun actual -> ", got " ^ show actual)
                 actual
-            ^ " at " ^ string_of_int i
+
+      let run_show p input =
+        run p input
+        |> Result.map_error (fun e ->
+               show_input (get_index e) input ^ show_error e)
     end
 
     module Make
-        (Stream : Stream)
+        (Stream : ShowStream)
         (S : sig
           include Show with type t = Stream.token
           include Set.OrderedType with type t := t
@@ -382,7 +409,7 @@ module Parser = struct
         end) =
     struct
       module T = Make (Stream) (S) (E)
-      include From (T) (S) (E)
+      include From (T) (Stream) (S) (E)
       include T
     end
   end
@@ -419,6 +446,25 @@ module Parser = struct
             Some (String.sub i 0 n, String.sub i n rest)
       (* with Invalid_argument _ -> None) *)
 
+      let reach_offset n i =
+        let line_number =
+          let rec inner line start =
+            try
+              let newline = String.index_from i start '\n' in
+              if newline > n then line
+              else inner (line + 1) (start + newline 
+              )
+            with Not_found | Invalid_argument _ -> line
+          in
+          inner 1 1
+        in
+
+        let start_index = String.rindex_from i n '\n' in
+        let end_index = String.index_from i n '\n' in
+        let substr = String.sub i (start_index ) (end_index - start_index - 1) in
+        ({ line = line_number; column = 0 }, Some (if substr = "" then "<empty line>" else substr))
+
+      let reach_offset_no_line _n _i = failwith ""
       let len = String.length
     end
 
@@ -486,8 +532,11 @@ module Parser = struct
     end
 
     module Show = struct
+      module type CharStreamShow = Show.ShowStream with type token = char
+
       module type TCharShow = sig
-        include TChar
+        module Stream : CharStreamShow
+        include TChar with module Stream := Stream
 
         include
           Show.TShow
@@ -501,14 +550,14 @@ module Parser = struct
       end
 
       module Make
-          (Stream : CharStream)
+          (Stream : CharStreamShow)
           (E : sig
             include Show
             include Set.OrderedType with type t := t
           end) =
       struct
         module T = Make (Stream) (E)
-        include Show.From (T) (Char) (E)
+        include Show.From (T) (Stream) (Char) (E)
         include T
       end
     end
@@ -521,12 +570,12 @@ module Parser = struct
       end
     end
 
-    module CharList = struct
-      module Make = Make (CharListStream)
-
-      module Show = struct
-        module Make = Show.Make (CharListStream)
-      end
-    end
+    (* module CharList = struct *)
+    (*   module Make = Make (CharListStream) *)
+    (**)
+    (*   module Show = struct *)
+    (*     module Make = Show.Make (CharListStream) *)
+    (*   end *)
+    (* end *)
   end
 end
