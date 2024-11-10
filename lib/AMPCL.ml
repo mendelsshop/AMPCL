@@ -8,26 +8,167 @@ module type Show = sig
   val show : t -> string
 end
 
-module type Stream = sig
-  (* TODO: constrain to ord *)
-  type token
+type pos = { column : int; line : int }
 
-  (* TODO: constrain to ord *)
-  type tokens
-  type t
+module Stream = struct
+  module type T = sig
+    (* TODO: constrain to ord *)
+    type token
 
-  val take1 : t -> (token * t) option
-  val taken : int -> t -> (tokens * t) option
-  val len : tokens -> int
-  val toTokens : tokens -> token list
+    (* TODO: constrain to ord *)
+    type tokens
+    type t
+
+    val take1 : t -> (token * t) option
+    val taken : int -> t -> (tokens * t) option
+    val len : tokens -> int
+    val toTokens : tokens -> token list
+  end
+
+  module Show = struct
+    module type TShow = sig
+      include T
+
+      val reach_offset : int -> t -> pos * string option
+      val reach_offset_no_line : int -> t -> pos
+    end
+  end
+
+  module CharList = struct
+    type token = char
+    type t = char list
+    type tokens = char list
+
+    let toTokens = Fun.id
+    let take1 = function s :: rest -> Some (s, rest) | [] -> None
+
+    let taken n =
+      let split n = function
+        | s when n <= 0 -> ([], s)
+        | s ->
+            let rec split n = function
+              | [] -> ([], [])
+              | s :: xs when n = 1 -> ([ s ], xs)
+              | s :: xs ->
+                  let s', xs' = split (n - 1) xs in
+                  (s :: s', xs')
+            in
+            split n s
+      in
+      function
+      | s when n <= 0 -> Some ([], s) | [] -> None | i -> Some (split n i)
+
+    let len = List.length
+
+    let reach_offset n input =
+      let input = List.to_seq input in
+      let line, column, substring, _ =
+        Seq.fold_lefti
+          (fun (line, column, substring, state) index char ->
+            if state = `Done then (line, column, substring, state)
+            else if char = '\n' && (state = `Line || n = index) then
+              (line, column, substring, `Done)
+            else
+              (* TODO: is n 0 indexed or not *)
+              let state = if n = index then `Line else state in
+              let line = if char = '\n' then line + 1 else line in
+              let column =
+                match char with
+                | _ when state = `Line -> column
+                | '\n' -> 1
+                | '\t' -> column + 4
+                | _ -> column + 1
+              in
+              let substring =
+                match char with
+                | '\n' -> ""
+                | '\t' -> substring ^ "    "
+                | _ -> substring ^ String.make 1 char
+              in
+              (line, column, substring, state))
+          (1, 1, "", `Looking) input
+      in
+
+      ( { column; line },
+        Some (if substring = "" then "<empty line>" else substring) )
+
+    let reach_offset_no_line _n _i = failwith ""
+  end
+
+  module String = struct
+    type token = char
+    type t = string
+    type tokens = string
+
+    let toTokens = explode
+
+    let take1 : t -> (token * t) option =
+     fun i ->
+      try Some (String.get i 0, String.sub i 1 (String.length i - 1))
+      with Invalid_argument _ -> None
+
+    let taken : int -> t -> (tokens * t) option =
+     fun n i ->
+      let len = String.length i in
+      match n with
+      | _ when n <= 0 -> Some (String.empty, i)
+      | _ when len = 0 -> None
+      | _ ->
+          (* TODO: make sure this math is correct *)
+          let n, rest = if n > len then (len, 0) else (n, len - n) in
+
+          Some (String.sub i 0 n, String.sub i n rest)
+
+    let reach_offset n i =
+      let len = String.length i in
+      let line_number =
+        let rec inner line start =
+          try
+            let newline = String.index_from i start '\n' in
+            if newline >= n then line else inner (line + 1) (start + newline + 1)
+          with Not_found | Invalid_argument _ -> line
+        in
+        inner 1 0
+      in
+
+      let start =
+        try
+          String.rindex_from_opt i (n - 1) '\n'
+          |> Option.fold ~some:(( + ) 1) ~none:0
+        with Invalid_argument _ -> 0
+      in
+      let end_index =
+        String.index_from_opt i n '\n' |> Option.fold ~some:Fun.id ~none:len
+      in
+      let colum_index = n - start in
+      let substr = String.sub i start (end_index - start) in
+      let substr = substr |> explode in
+      let substr = substr |> List.mapi (fun a b -> (a, b)) in
+      let colum_index, substr =
+        substr
+        |> List.fold_left
+             (fun (c : int * char list) (i : int * char) ->
+               ( (if fst i >= colum_index then fst c
+                  else if snd i = '\t' then fst c + 4
+                  else fst c + 1),
+                 if snd i = '\t' then
+                   snd c @ (' ' :: ' ' :: ' ' :: ' ' :: [ ' ' ])
+                 else snd c @ [ snd i ] ))
+             (0, [])
+      in
+      let substr = substr |> implode in
+      ( { line = line_number; column = colum_index + 1 },
+        Some (if substr = "" then "<empty line>" else substr) )
+
+    let reach_offset_no_line _n _i = failwith ""
+    let len = String.length
+  end
 end
 
 (* TODO: instead of paramterizing over individual input type, parameterize over input stream *)
 module Parser = struct
-  type pos = { column : int; line : int }
-
   module type T = sig
-    module Stream : Stream
+    module Stream : Stream.T
 
     type e
     type error_item = Label of string | Tokens of Stream.token list | EOF
@@ -89,7 +230,7 @@ module Parser = struct
   end
 
   module Make
-      (Stream : Stream)
+      (Stream : Stream.T)
       (S : Set.OrderedType with type t = Stream.token)
       (E : Set.OrderedType) =
   struct
@@ -335,15 +476,8 @@ module Parser = struct
   end
 
   module Show = struct
-    module type ShowStream = sig
-      include Stream
-
-      val reach_offset : int -> t -> pos * string option
-      val reach_offset_no_line : int -> t -> pos
-    end
-
     module type TShow = sig
-      module Stream : ShowStream
+      module Stream : Stream.Show.TShow
       include T with module Stream := Stream
 
       val show_error : error -> string
@@ -353,7 +487,7 @@ module Parser = struct
 
     module From
         (T : T)
-        (Stream : ShowStream
+        (Stream : Stream.Show.TShow
                     with type t = T.Stream.t
                      and type token = T.Stream.token
                      and type tokens = T.Stream.tokens)
@@ -411,7 +545,7 @@ module Parser = struct
     end
 
     module Make
-        (Stream : ShowStream)
+        (Stream : Stream.Show.TShow)
         (S : sig
           include Show with type t = Stream.token
           include Set.OrderedType with type t := t
@@ -439,138 +573,7 @@ module Parser = struct
         | _ -> String.make 1 c
     end
 
-    module StringStream = struct
-      type token = char
-      type t = string
-      type tokens = string
-
-      let toTokens = explode
-
-      let take1 : t -> (token * t) option =
-       fun i ->
-        try Some (String.get i 0, String.sub i 1 (String.length i - 1))
-        with Invalid_argument _ -> None
-
-      let taken : int -> t -> (tokens * t) option =
-       fun n i ->
-        let len = String.length i in
-        match n with
-        | _ when n <= 0 -> Some (String.empty, i)
-        | _ when len = 0 -> None
-        | _ ->
-            (* TODO: make sure this math is correct *)
-            let n, rest = if n > len then (len, 0) else (n, len - n) in
-
-            Some (String.sub i 0 n, String.sub i n rest)
-
-      let reach_offset n i =
-        let len = String.length i in
-        let line_number =
-          let rec inner line start =
-            try
-              let newline = String.index_from i start '\n' in
-              if newline >= n then line
-              else inner (line + 1) (start + newline + 1)
-            with Not_found | Invalid_argument _ -> line
-          in
-          inner 1 0
-        in
-
-        let start =
-          try
-            String.rindex_from_opt i (n - 1) '\n'
-            |> Option.fold ~some:(( + ) 1) ~none:0
-          with Invalid_argument _ -> 0
-        in
-        let end_index =
-          String.index_from_opt i n '\n' |> Option.fold ~some:Fun.id ~none:len
-        in
-        let colum_index = n - start in
-        let substr = String.sub i start (end_index - start) in
-        let substr = substr |> explode in
-        let substr = substr |> List.mapi (fun a b -> (a, b)) in
-        let colum_index, substr =
-          substr
-          |> List.fold_left
-               (fun (c : int * char list) (i : int * char) ->
-                 ( (if fst i >= colum_index then fst c
-                    else if snd i = '\t' then fst c + 4
-                    else fst c + 1),
-                   if snd i = '\t' then
-                     snd c @ (' ' :: ' ' :: ' ' :: ' ' :: [ ' ' ])
-                   else snd c @ [ snd i ] ))
-               (0, [])
-        in
-        let substr = substr |> implode in
-        ( { line = line_number; column = colum_index + 1 },
-          Some (if substr = "" then "<empty line>" else substr) )
-
-      let reach_offset_no_line _n _i = failwith ""
-      let len = String.length
-    end
-
-    module CharListStream = struct
-      type token = char
-      type t = char list
-      type tokens = char list
-
-      let toTokens = Fun.id
-      let take1 = function s :: rest -> Some (s, rest) | [] -> None
-
-      let taken n =
-        let split n = function
-          | s when n <= 0 -> ([], s)
-          | s ->
-              let rec split n = function
-                | [] -> ([], [])
-                | s :: xs when n = 1 -> ([ s ], xs)
-                | s :: xs ->
-                    let s', xs' = split (n - 1) xs in
-                    (s :: s', xs')
-              in
-              split n s
-        in
-        function
-        | s when n <= 0 -> Some ([], s) | [] -> None | i -> Some (split n i)
-
-      let len = List.length
-
-      let reach_offset n input =
-        let input = List.to_seq input in
-        let line, column, substring, _ =
-          Seq.fold_lefti
-            (fun (line, column, substring, state) index char ->
-              if state = `Done then (line, column, substring, state)
-              else if char = '\n' && (state = `Line || n = index) then
-                (line, column, substring, `Done)
-              else
-                (* TODO: is n 0 indexed or not *)
-                let state = if n = index then `Line else state in
-                let line = if char = '\n' then line + 1 else line in
-                let column =
-                  match char with
-                  | _ when state = `Line -> column
-                  | '\n' -> 1
-                  | '\t' -> column + 4
-                  | _ -> column + 1
-                in
-                let substring =
-                  match char with
-                  | '\n' -> ""
-                  | '\t' -> substring ^ "    "
-                  | _ -> substring ^ String.make 1 char
-                in
-                (line, column, substring, state))
-            (1, 1, "", `Looking) input
-        in
-
-        ( { column; line },
-          Some (if substring = "" then "<empty line>" else substring) )
-
-      let reach_offset_no_line _n _i = failwith ""
-    end
-
-    module type CharStream = Stream with type token = char
+    module type CharStream = Stream.T with type token = char
 
     module type TChar = sig
       module Stream : CharStream
@@ -610,7 +613,7 @@ module Parser = struct
     end
 
     module Show = struct
-      module type CharStreamShow = Show.ShowStream with type token = char
+      module type CharStreamShow = Stream.Show.TShow with type token = char
 
       module type TCharShow = sig
         module Stream : CharStreamShow
@@ -641,18 +644,18 @@ module Parser = struct
     end
 
     module String = struct
-      module Make = Make (StringStream)
+      module Make = Make (Stream.String)
 
       module Show = struct
-        module Make = Show.Make (StringStream)
+        module Make = Show.Make (Stream.String)
       end
     end
 
     module CharList = struct
-      module Make = Make (CharListStream)
+      module Make = Make (Stream.CharList)
 
       module Show = struct
-        module Make = Show.Make (CharListStream)
+        module Make = Show.Make (Stream.CharList)
       end
     end
   end
