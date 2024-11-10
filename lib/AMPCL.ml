@@ -534,6 +534,40 @@ module Parser = struct
         | s when n <= 0 -> Some ([], s) | [] -> None | i -> Some (split n i)
 
       let len = List.length
+
+      let reach_offset n input =
+        let input = List.to_seq input in
+        let line, column, substring, _ =
+          Seq.fold_lefti
+            (fun (line, column, substring, state) index char ->
+              if state = `Done then (line, column, substring, state)
+              else if char = '\n' && (state = `Line || n = index) then
+                (line, column, substring, `Done)
+              else
+                (* TODO: is n 0 indexed or not *)
+                let state = if n = index then `Line else state in
+                let line = if char = '\n' then line + 1 else line in
+                let column =
+                  match char with
+                  | _ when state = `Line -> column
+                  | '\n' -> 1
+                  | '\t' -> column + 4
+                  | _ -> column + 1
+                in
+                let substring =
+                  match char with
+                  | '\n' -> ""
+                  | '\t' -> substring ^ "    "
+                  | _ -> substring ^ String.make 1 char
+                in
+                (line, column, substring, state))
+            (1, 1, "", `Looking) input
+        in
+
+        ( { column; line },
+          Some (if substring = "" then "<empty line>" else substring) )
+
+      let reach_offset_no_line _n _i = failwith ""
     end
 
     module type CharStream = Stream with type token = char
@@ -614,12 +648,12 @@ module Parser = struct
       end
     end
 
-    (* module CharList = struct *)
-    (*   module Make = Make (CharListStream) *)
-    (**)
-    (*   module Show = struct *)
-    (*     module Make = Show.Make (CharListStream) *)
-    (*   end *)
-    (* end *)
+    module CharList = struct
+      module Make = Make (CharListStream)
+
+      module Show = struct
+        module Make = Show.Make (CharListStream)
+      end
+    end
   end
 end
