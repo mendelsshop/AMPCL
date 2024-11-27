@@ -30,7 +30,6 @@ module Stream = struct
       include T
 
       val reach_offset : int -> t -> pos * string option
-      val reach_offset_no_line : int -> t -> pos
     end
   end
 
@@ -91,8 +90,6 @@ module Stream = struct
 
       ( { column; line },
         Some (if substring = "" then "<empty line>" else substring) )
-
-    let reach_offset_no_line _n _i = failwith ""
   end
 
   module String = struct
@@ -160,7 +157,6 @@ module Stream = struct
       ( { line = line_number; column = colum_index + 1 },
         Some (if substr = "" then "<empty line>" else substr) )
 
-    let reach_offset_no_line _n _i = failwith ""
     let len = String.length
   end
 end
@@ -192,6 +188,7 @@ module Parser = struct
         }
 
     val label : string -> 'a t -> 'a t
+    val (<?>) :  'a t -> string -> 'a t
     val chunk : Stream.tokens -> Stream.tokens t
     val sat : (Stream.token -> bool) -> Stream.token t
     val return : 'a -> 'a t
@@ -202,10 +199,10 @@ module Parser = struct
     val item : Stream.token t
     val token : (Stream.token -> ErrorItemSet.t option) -> Stream.token t
 
-    (* val tokens : *)
-    (*   (Stream.tokens -> Stream.tokens -> bool) -> *)
-    (*   Stream.tokens -> *)
-    (*   Stream.tokens t *)
+    val tokens :
+      (Stream.tokens -> Stream.tokens -> bool) ->
+      Stream.tokens ->
+      Stream.tokens t
 
     val bind : ('a -> 'b t) -> 'a t -> 'b t
     val ( <|> ) : 'a t -> 'a t -> 'a t
@@ -362,6 +359,7 @@ module Parser = struct
       map_error (function
         | Default (_, a, i) -> Default (ErrorItemSet.singleton (Label e), a, i)
         | Custom _ as e -> e)
+    let (<?>) p l =  label l p
 
     let alt_error : error -> error -> error =
      fun e1 e2 ->
@@ -439,7 +437,6 @@ module Parser = struct
 
     let sat p = token (fun s -> if p s then None else Some ErrorItemSet.empty)
 
-    (*TODO: better error*)
     let rec many parser =
       let neMany =
         parser >>= fun x ->
@@ -522,9 +519,7 @@ module Parser = struct
 
       let show_error error =
         let show = function
-          | Label l ->
-              print_endline "label";
-              l
+          | Label l -> l
           | Tokens t -> t |> List.map S.show |> String.concat ""
           | EOF -> "eof"
         in
