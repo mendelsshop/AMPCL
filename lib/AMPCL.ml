@@ -21,6 +21,7 @@ module Stream = struct
 
     val take1 : t -> (token * t) option
     val taken : int -> t -> (tokens * t) option
+    val takeWhile : (token -> bool) -> t -> tokens * t
     val len : tokens -> int
     val toTokens : tokens -> token list
   end
@@ -57,6 +58,7 @@ module Stream = struct
       function
       | s when n <= 0 -> Some ([], s) | [] -> None | i -> Some (split n i)
 
+    let takeWhile = List.partition
     let len = List.length
 
     let reach_offset n input =
@@ -113,8 +115,12 @@ module Stream = struct
       | _ ->
           (* TODO: make sure this math is correct *)
           let n, rest = if n > len then (len, 0) else (n, len - n) in
-
           Some (String.sub i 0 n, String.sub i n rest)
+
+    let takeWhile p i =
+      let charList = String.to_seq i in
+      let taken, rest = Seq.partition p charList in
+      (String.of_seq taken, String.of_seq rest)
 
     let reach_offset n i =
       let len = String.length i in
@@ -188,7 +194,7 @@ module Parser = struct
         }
 
     val label : string -> 'a t -> 'a t
-    val (<?>) :  'a t -> string -> 'a t
+    val ( <?> ) : 'a t -> string -> 'a t
     val chunk : Stream.tokens -> Stream.tokens t
     val sat : (Stream.token -> bool) -> Stream.token t
     val return : 'a -> 'a t
@@ -197,6 +203,7 @@ module Parser = struct
     val ( <$> ) : 'a t -> ('a -> 'b) -> 'b t
     val zero : 'a t
     val item : Stream.token t
+    val takeWhile : (Stream.token -> bool) -> Stream.tokens t
     val token : (Stream.token -> ErrorItemSet.t option) -> Stream.token t
 
     val tokens :
@@ -322,6 +329,16 @@ module Parser = struct
                     err (unexpected pos ps) s);
         }
 
+    let takeWhile p =
+      Parser
+        {
+          unParse =
+            (fun { input; pos } ok _ ->
+              let tokens, input' = Stream.takeWhile p input in
+              let absorbed_len = Stream.len tokens in
+              ok tokens { input = input'; pos = pos + absorbed_len });
+        }
+
     let chunk = tokens ( = )
     let map f = bind (f & return)
     let ( <$> ) p f = map f p
@@ -359,7 +376,8 @@ module Parser = struct
       map_error (function
         | Default (_, a, i) -> Default (ErrorItemSet.singleton (Label e), a, i)
         | Custom _ as e -> e)
-    let (<?>) p l =  label l p
+
+    let ( <?> ) p l = label l p
 
     let alt_error : error -> error -> error =
      fun e1 e2 ->
@@ -602,8 +620,13 @@ module Parser = struct
 
       let letter = upper <|> lower |> label "letter"
       let alphanum = letter <|> digit |> label " digit"
-      let word = many letter <$> implode
-      let word1 = many1 letter <$> implode |> label "word"
+
+      let word =
+        takeWhile (fun x -> ('a' <= x && x <= 'z') || ('A' <= x && x <= 'Z'))
+        |> label "word"
+
+      (* TODO: make takewhile1  *)
+      let word1 = check (fun w -> Stream.len w > 0) word
       let string = chunk
     end
 
