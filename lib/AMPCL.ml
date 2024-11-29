@@ -238,256 +238,266 @@ module Parser = struct
       (S : Set.OrderedType with type t = Stream.token)
       (E : Set.OrderedType) =
   struct
-    module Stream = Stream
+    module rec Implementation :
+      (T with type e = E.t and module Stream = Stream) = struct
+      module Stream = Stream
 
-    type e = E.t
-    type error_item = Label of string | Tokens of Stream.token list | EOF
+      type e = E.t
+      type error_item = Label of string | Tokens of Stream.token list | EOF
 
-    module ErrorItemSet = Set.Make (struct
-      type t = error_item
+      module ErrorItemSet = Set.Make (struct
+        type t = error_item
 
-      let compare v1 v2 =
-        match (v1, v2) with
-        | Label l, Label l' -> String.compare l l'
-        | Tokens t, Tokens t' -> List.compare S.compare t t'
-        | _ -> 1
-    end)
+        let compare v1 v2 =
+          match (v1, v2) with
+          | Label l, Label l' -> String.compare l l'
+          | Tokens t, Tokens t' -> List.compare S.compare t t'
+          | _ -> 1
+      end)
 
-    type state = { pos : int; input : Stream.t }
+      type state = { pos : int; input : Stream.t }
 
-    type error =
-      | Default of ErrorItemSet.t * error_item option * int
-      | Custom of e * int
+      type error =
+        | Default of ErrorItemSet.t * error_item option * int
+        | Custom of e * int
 
-    (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
+      (*TODO: make a function map error that takes a new error type with at least ord and then return an instance of a module with same input type, but different error type*)
 
-    type 'a t =
-      | Parser of {
-          unParse :
-            'b 'ee.
-            state ->
-            ('a -> state -> state * ('b, error) result) ->
-            (error -> state -> state * ('b, error) result) ->
-            state * ('b, error) result;
-        }
+      type 'a t =
+        | Parser of {
+            unParse :
+              'b 'ee.
+              state ->
+              ('a -> state -> state * ('b, error) result) ->
+              (error -> state -> state * ('b, error) result) ->
+              state * ('b, error) result;
+          }
 
-    let return v = Parser { unParse = (fun s ok _ -> ok v s) }
+      let return v = Parser { unParse = (fun s ok _ -> ok v s) }
 
-    let ( >>= ) (Parser { unParse = unParseP }) q =
-      Parser
-        {
-          unParse =
-            (fun s ok err ->
-              let mok x s' =
-                let (Parser { unParse = unParseQ }) = q x in
-                unParseQ s' ok err
-              in
-              unParseP s mok err);
-        }
-
-    let bind f p = p >>= f
-
-    let eof =
-      Parser
-        {
-          unParse =
-            (fun ({ input; pos } as s) ok err ->
-              match Stream.take1 input with
-              | None -> ok () s
-              | Some (x, _) ->
-                  err
-                    (Default
-                       (ErrorItemSet.singleton EOF, Some (Tokens [ x ]), pos))
-                    s);
-        }
-
-    let zero =
-      Parser
-        {
-          unParse =
-            (fun s _ err -> err (Default (ErrorItemSet.empty, None, 0)) s);
-        }
-
-    let tokens f tts =
-      Parser
-        {
-          unParse =
-            (fun ({ input; pos } as s) ok err ->
-              let unexpected pos' u =
-                let ps =
-                  Tokens (tts |> Stream.toTokens) |> ErrorItemSet.singleton
+      let ( >>= ) (Parser { unParse = unParseP }) q =
+        Parser
+          {
+            unParse =
+              (fun s ok err ->
+                let mok x s' =
+                  let (Parser { unParse = unParseQ }) = q x in
+                  unParseQ s' ok err
                 in
-                Default (ps, Some u, pos')
-              in
-              let len = Stream.len tts in
-              match Stream.taken len input with
-              | None -> err (unexpected pos EOF) s
-              | Some (tts', input') ->
-                  if f tts tts' then ok tts' { input = input'; pos = pos + len }
-                  else
-                    let ps = Tokens (tts' |> Stream.toTokens) in
-                    err (unexpected pos ps) s);
-        }
+                unParseP s mok err);
+          }
 
-    let takeWhile p =
-      Parser
-        {
-          unParse =
-            (fun { input; pos } ok _ ->
-              let tokens, input' = Stream.takeWhile p input in
-              let absorbed_len = Stream.len tokens in
-              ok tokens { input = input'; pos = pos + absorbed_len });
-        }
+      let bind f p = p >>= f
 
-    let chunk = tokens ( = )
-    let map f = bind (f & return)
-    let ( <$> ) p f = map f p
+      let eof =
+        Parser
+          {
+            unParse =
+              (fun ({ input; pos } as s) ok err ->
+                match Stream.take1 input with
+                | None -> ok () s
+                | Some (x, _) ->
+                    err
+                      (Default
+                         (ErrorItemSet.singleton EOF, Some (Tokens [ x ]), pos))
+                      s);
+          }
 
-    let seq p q =
-      p >>= fun x ->
-      q >>= fun y -> return (x, y)
+      let zero =
+        Parser
+          {
+            unParse =
+              (fun s _ err -> err (Default (ErrorItemSet.empty, None, 0)) s);
+          }
 
-    let ( << ) p q = p >>= fun _ -> q
-    let keep_right = ( << )
+      let tokens f tts =
+        Parser
+          {
+            unParse =
+              (fun ({ input; pos } as s) ok err ->
+                let unexpected pos' u =
+                  let ps =
+                    Tokens (tts |> Stream.toTokens) |> ErrorItemSet.singleton
+                  in
+                  Default (ps, Some u, pos')
+                in
+                let len = Stream.len tts in
+                match Stream.taken len input with
+                | None -> err (unexpected pos EOF) s
+                | Some (tts', input') ->
+                    if f tts tts' then
+                      ok tts' { input = input'; pos = pos + len }
+                    else
+                      let ps = Tokens (tts' |> Stream.toTokens) in
+                      err (unexpected pos ps) s);
+          }
 
-    let ( >> ) p q =
-      p >>= fun r ->
-      q >>= fun _ -> return r
+      let takeWhile p =
+        Parser
+          {
+            unParse =
+              (fun { input; pos } ok _ ->
+                let tokens, input' = Stream.takeWhile p input in
+                let absorbed_len = Stream.len tokens in
+                ok tokens { input = input'; pos = pos + absorbed_len });
+          }
 
-    let keep_left = ( >> )
+      let chunk = tokens ( = )
+      let map f = bind (f & return)
+      let ( <$> ) p f = map f p
 
-    (*This does not work because, it takes a parser of 'e and returns a parser of 'ee*)
-    (*But, we also take a new error ('ee) for the return parse (along with the input) which is fed into the orginal parser which expects 'e (this doesn't work for  base combinators, see item)*)
-    (*Maybe just refactor parser definiton*)
-    let map_error f (Parser { unParse = p }) =
-      Parser
-        {
-          unParse =
-            (fun s ok err ->
-              let err' e s' = err (f e) s' in
-              let ok' e s' = ok e s' in
-              p s ok' err');
-        }
-
-    (* let map_label f = map_error (function Label l -> Label (f l) | e -> e) *)
-    let bigger a b x y = if a >= b then x else y
-
-    let label e =
-      map_error (function
-        | Default (_, a, i) -> Default (ErrorItemSet.singleton (Label e), a, i)
-        | Custom _ as e -> e)
-
-    let ( <?> ) p l = label l p
-
-    let alt_error : error -> error -> error =
-     fun e1 e2 ->
-      match (e1, e2) with
-      (* TODO: merge custom errors
-         This requires changing custom to list of customs
-         maybe we should have list of errors, or split like megaparsec into custom or not custom each one should be a list of errors of that type
-         type default = | Label of string | Fail | ...
-         type 'e error = Custom of 'e list | Default of default list
-      *)
-      | Custom (_, pos1), Custom (_, pos2) -> bigger pos1 pos2 e1 e2
-      | (Custom _ as c), _ | _, (Custom _ as c) -> c
-      | Default (l1, a1, p1), Default (l2, a2, p2) ->
-          (* TODO: find the error that absorbed the most input *)
-          Default (ErrorItemSet.union l1 l2, bigger p1 p2 a1 a2, max p1 p2)
-
-    (* let map_error (module E': Set.OrderedType) f (Parser { unParse = p }): Parser(S) (E).t= *)
-    (*   Parser *)
-    (*     { *)
-    (*       unParse = *)
-    (*         (fun s ok err -> *)
-    (*           let err' e s' = err (f e) s' in *)
-    (*           let ok' e s' = ok e s' in *)
-    (*           p s ok' err'); *)
-    (*     } *)
-    let ( <|> ) (Parser { unParse = p }) (Parser { unParse = q }) =
-      Parser
-        {
-          unParse =
-            (fun s ok err ->
-              let error e _ms =
-                let nerror e' s' = err (alt_error e e') s' in
-                q s ok nerror
-              in
-              p s ok error);
-        }
-
-    let alt = ( <|> )
-    let between l r p = l << p >> r
-
-    (*TODO: make error not contain fail*)
-    let rec choice = function [] -> zero | fst :: rest -> fst <|> choice rest
-
-    (*We cannot make this, be (..., 'e, 'e) parser, because then you cannot map error over it, but since we are plugging in the input error in*)
-    (*TODO: token parser might be better as it is more primitive / better errors*)
-    let item =
-      Parser
-        {
-          unParse =
-            (fun { input; pos } ok err ->
-              match Stream.take1 input with
-              | None ->
-                  err
-                    (Default (ErrorItemSet.singleton (Label "eof"), None, pos))
-                    { input; pos }
-              | Some (s, rest) -> ok s { input = rest; pos = pos + 1 });
-        }
-
-    let token f =
-      Parser
-        {
-          unParse =
-            (fun { input; pos } ok err ->
-              match Stream.take1 input with
-              | None ->
-                  err
-                    (Default (ErrorItemSet.singleton (Label "eof"), None, pos))
-                    { input; pos }
-              | Some (s, rest) -> (
-                  match f s with
-                  | Some e ->
-                      err (Default (e, Some (Tokens [ s ]), pos)) { pos; input }
-                  | _ -> ok s { input = rest; pos = pos + 1 }));
-        }
-
-    let sat p = token (fun s -> if p s then None else Some ErrorItemSet.empty)
-
-    let rec many parser =
-      let neMany =
-        parser >>= fun x ->
-        many parser >>= fun xs -> return (x :: xs)
-      in
-      neMany <|> return []
-
-    let many1 p =
-      p >>= fun x ->
-      many p >>= fun xs -> return (x :: xs)
-
-    let sepby1 p sep =
-      p >>= fun x ->
-      many (sep << p) >>= fun xs -> return (x :: xs)
-
-    let sepby p sep = sepby1 p sep <|> return []
-    let opt p = p <$> (fun x -> Some x) <|> return None
-
-    let rec count n p =
-      if n = 0 then return []
-      else
+      let seq p q =
         p >>= fun x ->
-        count (n - 1) p >>= fun xs -> return (x :: xs)
+        q >>= fun y -> return (x, y)
 
-    let check predicate p =
-      p >>= fun x -> if predicate x then return x else zero
+      let ( << ) p q = p >>= fun _ -> q
+      let keep_right = ( << )
 
-    let run' (Parser { unParse }) input =
-      unParse { pos = 0; input }
-        (fun a s -> (s, Ok a))
-        (fun e s -> (s, Error e))
+      let ( >> ) p q =
+        p >>= fun r ->
+        q >>= fun _ -> return r
 
-    let run p str = run' p str |> snd
+      let keep_left = ( >> )
+
+      (*This does not work because, it takes a parser of 'e and returns a parser of 'ee*)
+      (*But, we also take a new error ('ee) for the return parse (along with the input) which is fed into the orginal parser which expects 'e (this doesn't work for  base combinators, see item)*)
+      (*Maybe just refactor parser definiton*)
+      let map_error (f : error -> error) (Parser { unParse = p } : 'a t) =
+        Parser
+          {
+            unParse =
+              (fun s ok err ->
+                let err' e s' = err (f e) s' in
+                let ok' e s' = ok e s' in
+                p s ok' err');
+          }
+
+      (* let map_label f = map_error (function Label l -> Label (f l) | e -> e) *)
+      let bigger a b x y = if a >= b then x else y
+
+      let label e =
+        map_error (function
+          | Default (_, a, i) -> Default (ErrorItemSet.singleton (Label e), a, i)
+          | Custom _ as e -> e)
+
+      let ( <?> ) p l = label l p
+
+      let alt_error : error -> error -> error =
+       fun e1 e2 ->
+        match (e1, e2) with
+        (* TODO: merge custom errors
+           This requires changing custom to list of customs
+           maybe we should have list of errors, or split like megaparsec into custom or not custom each one should be a list of errors of that type
+           type default = | Label of string | Fail | ...
+           type 'e error = Custom of 'e list | Default of default list
+        *)
+        | Custom (_, pos1), Custom (_, pos2) -> bigger pos1 pos2 e1 e2
+        | (Custom _ as c), _ | _, (Custom _ as c) -> c
+        | Default (l1, a1, p1), Default (l2, a2, p2) ->
+            (* TODO: find the error that absorbed the most input *)
+            Default (ErrorItemSet.union l1 l2, bigger p1 p2 a1 a2, max p1 p2)
+
+      (* let map_error (module E': Set.OrderedType) f (Parser { unParse = p }): Parser(S) (E).t= *)
+      (*   Parser *)
+      (*     { *)
+      (*       unParse = *)
+      (*         (fun s ok err -> *)
+      (*           let err' e s' = err (f e) s' in *)
+      (*           let ok' e s' = ok e s' in *)
+      (*           p s ok' err'); *)
+      (*     } *)
+      let ( <|> ) (Parser { unParse = p }) (Parser { unParse = q }) =
+        Parser
+          {
+            unParse =
+              (fun s ok err ->
+                let error e _ms =
+                  let nerror e' s' = err (alt_error e e') s' in
+                  q s ok nerror
+                in
+                p s ok error);
+          }
+
+      let alt = ( <|> )
+      let between l r p = l << p >> r
+
+      (*TODO: make error not contain fail*)
+      let rec choice = function
+        | [] -> zero
+        | fst :: rest -> fst <|> choice rest
+
+      (*We cannot make this, be (..., 'e, 'e) parser, because then you cannot map error over it, but since we are plugging in the input error in*)
+      (*TODO: token parser might be better as it is more primitive / better errors*)
+      let item =
+        Parser
+          {
+            unParse =
+              (fun { input; pos } ok err ->
+                match Stream.take1 input with
+                | None ->
+                    err
+                      (Default (ErrorItemSet.singleton (Label "eof"), None, pos))
+                      { input; pos }
+                | Some (s, rest) -> ok s { input = rest; pos = pos + 1 });
+          }
+
+      let token f =
+        Parser
+          {
+            unParse =
+              (fun { input; pos } ok err ->
+                match Stream.take1 input with
+                | None ->
+                    err
+                      (Default (ErrorItemSet.singleton (Label "eof"), None, pos))
+                      { input; pos }
+                | Some (s, rest) -> (
+                    match f s with
+                    | Some e ->
+                        err
+                          (Default (e, Some (Tokens [ s ]), pos))
+                          { pos; input }
+                    | _ -> ok s { input = rest; pos = pos + 1 }));
+          }
+
+      let sat p = token (fun s -> if p s then None else Some ErrorItemSet.empty)
+
+      let rec many parser =
+        let neMany =
+          parser >>= fun x ->
+          many parser >>= fun xs -> return (x :: xs)
+        in
+        neMany <|> return []
+
+      let many1 p =
+        p >>= fun x ->
+        many p >>= fun xs -> return (x :: xs)
+
+      let sepby1 p sep =
+        p >>= fun x ->
+        many (sep << p) >>= fun xs -> return (x :: xs)
+
+      let sepby p sep = sepby1 p sep <|> return []
+      let opt p = p <$> (fun x -> Some x) <|> return None
+
+      let rec count n p =
+        if n = 0 then return []
+        else
+          p >>= fun x ->
+          count (n - 1) p >>= fun xs -> return (x :: xs)
+
+      let check predicate p =
+        p >>= fun x -> if predicate x then return x else zero
+
+      let run' (Parser { unParse }) input =
+        unParse { pos = 0; input }
+          (fun a s -> (s, Ok a))
+          (fun e s -> (s, Error e))
+
+      let run p str = run' p str |> snd
+    end
+
+    include Implementation
   end
 
   module Show = struct
@@ -626,7 +636,7 @@ module Parser = struct
         |> label "word"
 
       (* TODO: make takewhile1  *)
-      let word1 = check (fun w -> Stream.len w > 0) word
+      let word1 = check (fun w -> Stream.len w > 0) word |> label "word"
       let string = chunk
     end
 
