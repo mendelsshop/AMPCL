@@ -21,6 +21,8 @@ module Stream = struct
 
     val take1 : t -> (token * t) option
     val taken : int -> t -> (tokens * t) option
+
+    (* TODO: make takewhile1  *)
     val takeWhile : (token -> bool) -> t -> tokens * t
     val len : tokens -> int
     val toTokens : tokens -> token list
@@ -56,9 +58,18 @@ module Stream = struct
             split n s
       in
       function
-      | s when n <= 0 -> Some ([], s) | [] -> None | i -> Some (split n i)
+      | s when n <= 0 -> Some ([], s)
+      | [] -> None
+      | i -> Some (split n i)
 
-    let takeWhile = List.partition
+    let takeWhile p xs =
+      let rec go f xs =
+        match xs with
+        | x :: xs' when p x -> go (fun rest -> f (x :: rest)) xs'
+        | _ -> (f [], xs)
+      in
+      go Fun.id xs
+
     let len = List.length
 
     let reach_offset n input =
@@ -118,9 +129,15 @@ module Stream = struct
           Some (String.sub i 0 n, String.sub i n rest)
 
     let takeWhile p i =
-      let charList = String.to_seq i in
-      let taken, rest = Seq.partition p charList in
-      (String.of_seq taken, String.of_seq rest)
+      let rec go index =
+        match String.get i index with
+        | x when p x -> go (index + 1)
+        | _ ->
+            let len = String.length i in
+            (String.sub i 0 index, String.sub i index (len - index))
+        | exception Invalid_argument _ -> (i, "")
+      in
+      go 0
 
     let reach_offset n i =
       let len = String.length i in
@@ -462,6 +479,7 @@ module Parser = struct
 
       let sat p = token (fun s -> if p s then None else Some ErrorItemSet.empty)
 
+      (* TODO: make atleast  *)
       let rec many parser =
         let neMany =
           parser >>= fun x ->
@@ -512,10 +530,11 @@ module Parser = struct
 
     module From
         (T : T)
-        (Stream : Stream.Show.TShow
-                    with type t = T.Stream.t
-                     and type token = T.Stream.token
-                     and type tokens = T.Stream.tokens)
+        (Stream :
+          Stream.Show.TShow
+            with type t = T.Stream.t
+             and type token = T.Stream.token
+             and type tokens = T.Stream.tokens)
         (S : sig
           include Show with type t = T.Stream.token
           include Set.OrderedType with type t := t
@@ -635,7 +654,6 @@ module Parser = struct
         takeWhile (fun x -> ('a' <= x && x <= 'z') || ('A' <= x && x <= 'Z'))
         |> label "word"
 
-      (* TODO: make takewhile1  *)
       let word1 = check (fun w -> Stream.len w > 0) word |> label "word"
       let string = chunk
     end
