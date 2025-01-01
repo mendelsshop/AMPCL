@@ -229,6 +229,7 @@ module Parser = struct
       Stream.tokens t
 
     val bind : ('a -> 'b t) -> 'a t -> 'b t
+    val ( <*> ) : ('a -> 'b) t -> 'a t -> 'b t
     val ( <|> ) : 'a t -> 'a t -> 'a t
     val alt : 'a t -> 'a t -> 'a t
     val choice : 'a t list -> 'a t
@@ -302,6 +303,16 @@ module Parser = struct
                   unParseQ s' ok err
                 in
                 unParseP s mok err);
+          }
+
+      let ( <*> ) (Parser { unParse = unParseF })
+          (Parser { unParse = unParseP }) =
+        Parser
+          {
+            unParse =
+              (fun s ok err ->
+                let ok x s' = unParseP s' (x & ok) err in
+                unParseF s ok err);
           }
 
       let bind f p = p >>= f
