@@ -248,6 +248,7 @@ module Parser = struct
     val many1 : 'a t -> 'a list t
     val run' : 'a t -> Stream.t -> state * ('a, error) result
     val run : 'a t -> Stream.t -> ('a, error) result
+    val makeRecParser : ('a t -> 'a t) -> 'a t
     val eof : unit t
   end
 
@@ -386,6 +387,16 @@ module Parser = struct
         q >>= fun _ -> return r
 
       let keep_left = ( >> )
+
+      (*TODO: syntax for this*)
+      let rec makeRecParser p =
+        Parser
+          {
+            unParse =
+              (fun s ok err ->
+                let (Parser { unParse }) = p (makeRecParser p) in
+                unParse s ok err);
+          }
 
       (*This does not work because, it takes a parser of 'e and returns a parser of 'ee*)
       (*But, we also take a new error ('ee) for the return parse (along with the input) which is fed into the orginal parser which expects 'e (this doesn't work for  base combinators, see item)*)
